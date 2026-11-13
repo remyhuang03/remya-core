@@ -8,13 +8,13 @@ File settingsConfigFile({
 }) {
   if (isDebug) {
     return File(
-      '${(repositoryDirectory ?? Directory.current).absolute.path}/config/config.local.toml',
+      '${(repositoryDirectory ?? Directory.current).absolute.path}/config/shared/theme.toml',
     );
   }
   final env = environment ?? Platform.environment;
   final configHome = env['XDG_CONFIG_HOME'];
   if (configHome != null && configHome.startsWith('/')) {
-    return File('$configHome/remya/settings/config.toml');
+    return File('$configHome/remya/shared/theme.toml');
   }
   final home = env['HOME'];
   if (home == null || !home.startsWith('/')) {
@@ -22,5 +22,5 @@ File settingsConfigFile({
       'An absolute HOME or XDG_CONFIG_HOME is required',
     );
   }
-  return File('$home/.config/remya/settings/config.toml');
+  return File('$home/.config/remya/shared/theme.toml');
 }

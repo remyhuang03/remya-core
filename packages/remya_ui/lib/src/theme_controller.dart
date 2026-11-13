@@ -4,8 +4,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import 'theme.dart';
-import 'theme_config.dart';
-import 'dbus_client.dart';
+
+import 'package:remya_client/settings_contract.dart';
 
 class SettingsThemeController extends ChangeNotifier {
   SettingsThemeController(this.resolveFile) : _client = null;
@@ -24,7 +24,7 @@ class SettingsThemeController extends ChangeNotifier {
   bool _disposed = false;
   String? _seed;
 
-  /// Accent is optional: an older service or a missing file keeps the default seed.
+  /// A missing accent file keeps the default seed.
   Future<String?> _readSeed(File? themeFile) async {
     try {
       if (_client case final client?) {

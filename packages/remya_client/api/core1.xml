@@ -1,29 +1,11 @@
 <node>
-  <!-- Get and Set remya-bar.clock-seconds read/write a boolean. Changed uses the same ID. -->
-  <!-- Get and Set remya-bar.keyboard-preview read/write a boolean. Changed uses the same ID. -->
-  <!-- Notifications: Get notifications reads all preferences; Get/Set notifications.*,
-       quiet-schedule.* and priority-notifications.* per docs/public-api.md#notifications.
-       Changed uses the written ID. -->
-  <!-- Launcher clipboard: Get clipboard returns {enabled,maxItems,retentionDays}.
-       Get/Set clipboard.history-enabled (bool), clipboard.max-items (1-5000),
-       clipboard.retention-days (1-365). Set clipboard.clear-history with true
-       clears Launcher history. Changed uses the written ID. -->
-  <!-- Get remya-bar.folded-apps returns IDs. Set accepts a JSON object with id and folded. -->
-  <!-- Get remya-bar.sidebar-layout returns the visible tile IDs in order.
-       Set accepts {expected,tiles}; Changed uses the same ID. -->
-  <!-- Get remya-bar.layout returns {groups,workspace_count,resources,window_app_name,media_marquee,center?}.
-       Set replaces it with the same JSON object; Changed uses the same ID. -->
-  <!-- OSD: Get remya-bar.osd returns {volume_step,brightness_step,gamma_min}.
-       Get/Set remya-bar.volume-step (1-25), remya-bar.brightness-step (1-25) and
-       remya-bar.gamma-min (10-90) read/write integer percentages; Changed uses the written ID.
-       Get/Set display-gamma reads/writes live hyprsunset gamma (10-100); Changed uses display-gamma.
-       Get/Set display-brightness:<output> reads/writes a single output's hardware brightness. -->
-  <!-- AI: Get ai.providers returns {codexbar,updatedAt,providers,catalog,bar}; Get ai.bar
-       returns {pinned,lowPercent,showUsed,ringOrder}; Get ai.provider/<id> returns
-       {provider,usage,modelsDev}. Set ai.providers {id,enabled?,source?},
-       ai.bar {pinned?,lowPercent?,showUsed?,ringOrder?}, ai.credential {id,apiKey|cookie|clear}
-       and ai.custom {add}|{remove} return the ai.providers reply and emit Changed
-       for the written ID and ai.providers. See docs/public-api.md#ai-providers. -->
+  <!-- AI: Get ai.providers returns {codexbar,updatedAt,providers,catalog}.
+       Get ai.provider/<id> returns {provider,usage,modelsDev}.
+       Set ai.providers {id,enabled?,source?}, ai.credential {id,apiKey|cookie|clear}
+       and ai.custom {add}|{remove} return ai.providers and emit Changed for
+       the written ID and ai.providers. -->
+  <!-- Get/Set display-gamma controls live hyprsunset gamma (10-100).
+       Get/Set display-brightness:<output> controls hardware brightness. -->
   <!-- Airplane: Get airplane returns live derived radio state; Get/Set
        airplane.enabled and airplane.wifi accept boolean strings. Set airplane.enabled
        disables/enables NM Wi-Fi/WWAN and all BlueZ adapters with readback.
@@ -85,7 +67,7 @@
        Worker operations return busy state; Changed storage and cleanup report completion/errors.
        Package operations use the existing authorized private helper, never the system updater.
        See docs/public-api.md and docs/storage.md for payload bounds and deletion semantics. -->
-  <interface name="top.remya.settings.Settings1">
+  <interface name="top.remya.Core1">
     <!-- system-information returns api_version and per-ID value/error observations;
          its 16 about.* info fields reject Set with ReadOnly. about is app metadata.
          hostname reads static/runtime/saved names and conflict state.
@@ -124,9 +106,31 @@
       <arg type="s" direction="in"/>
       <arg type="s" direction="out"/>
     </method>
+    <!-- Manage opts a feature into persistence and returns its Get payload.
+         Unknown features fail with InvalidArgument. Get/Reload never opt in. -->
+    <method name="Manage">
+      <arg type="s" direction="in"/>
+      <arg type="s" direction="out"/>
+    </method>
     <method name="Set">
       <arg type="s" direction="in"/>
       <arg type="s" direction="in"/>
+      <arg type="s" direction="out"/>
+    </method>
+    <!-- App preferences: Get/Set <registration-id>.<key> return
+         {id,availability,value,revision}. Replace compares the current revision.
+         Set/Replace emit Changed for the complete setting id.
+         List includes apps (including registration errors); Search app results
+         carry app (registration id) and page for OpenApp. -->
+    <method name="Replace">
+      <arg name="id" type="s" direction="in"/>
+      <arg name="value" type="s" direction="in"/>
+      <arg name="revision" type="s" direction="in"/>
+      <arg type="s" direction="out"/>
+    </method>
+    <method name="OpenApp">
+      <arg name="app_id" type="s" direction="in"/>
+      <arg name="page" type="s" direction="in"/>
       <arg type="s" direction="out"/>
     </method>
     <method name="List">

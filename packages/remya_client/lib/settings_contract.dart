@@ -22,13 +22,6 @@ export 'src/camera.dart';
 
 export 'src/power.dart';
 export 'src/input.dart';
-export 'src/bar_clock.dart';
-export 'src/notifications.dart';
-export 'src/clipboard.dart';
-export 'src/bar_tray.dart';
-export 'src/sidebar.dart';
-export 'src/bar_layout.dart';
-export 'src/bar_osd.dart';
 export 'src/startup.dart';
 export 'src/storage.dart';
 export 'src/theme_packs.dart';
@@ -36,3 +29,5 @@ export 'src/text_size.dart';
 export 'src/language.dart';
 export 'src/ai.dart';
 export 'src/printers.dart';
+
+export 'src/app_preferences.dart';
