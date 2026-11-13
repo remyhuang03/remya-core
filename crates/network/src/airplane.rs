@@ -1,6 +1,6 @@
 //! Airplane mode is derived from live radios, never restored at startup.
 use crate::nm;
-use remya_settings_bluetooth::Bluetooth;
+use remya_bluetooth::Bluetooth;
 use serde_json::{Value, json};
 
 pub const ENABLED: &str = "airplane.enabled";

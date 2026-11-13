@@ -270,6 +270,7 @@ fn reconciliation_initialization_conflicts_resolutions_and_adoption() {
     let first = put(&m, false, "a.desktop", "");
     assert!(!m.config.exists());
     m.refresh().unwrap();
+    m.manage().unwrap();
     assert_eq!(m.saved, Some(m.system.clone()));
     fs::write(&first, desktop("a.desktop", "Hidden=true\n")).unwrap();
     m.refresh().unwrap();
@@ -302,6 +303,7 @@ fn invalid_config_detection_and_write_failures_retain_last_valid_saved() {
     let (_temp, mut m) = setup();
     put(&m, false, "a.desktop", "");
     m.refresh().unwrap();
+    m.manage().unwrap();
     let saved = m.saved.clone();
     for bad in [
         "invalid [",
@@ -318,6 +320,8 @@ fn invalid_config_detection_and_write_failures_retain_last_valid_saved() {
     }
     fs::remove_file(&m.config).unwrap();
     m.refresh().unwrap();
+    assert!(!m.config.exists());
+    m.manage().unwrap();
     let valid = fs::read(&m.config).unwrap();
     m.writer = fail_write;
     assert!(set(&mut m, "a.desktop", false).is_err());
@@ -339,9 +343,10 @@ fn invalid_config_detection_and_write_failures_retain_last_valid_saved() {
     assert_eq!(m.saved, saved);
     let (_fresh_temp, mut fresh) = setup();
     fresh.writer = fail_write;
-    assert!(fresh.refresh().is_err());
+    fresh.refresh().unwrap();
+    assert!(fresh.manage().is_err());
     assert!(!fresh.config.exists());
-    assert!(fresh.saved.is_none());
+    assert_eq!(fresh.saved, Some(fresh.system.clone()));
     let (_unreadable_temp, mut unreadable) = setup();
     let user = unreadable.dirs().unwrap().user.clone();
     fs::remove_dir(&user).unwrap();
@@ -401,6 +406,7 @@ fn readback_failure_and_unreadable_config_keep_the_saved_file() {
     let (_temp, mut m) = setup();
     put(&m, false, "a.desktop", "");
     m.refresh().unwrap();
+    m.manage().unwrap();
     let saved = fs::read(&m.config).unwrap();
     m.writer = |path, data| {
         if path
@@ -516,6 +522,7 @@ fn hidden_user_overrides_merge_filters_with_user_keys_winning() {
 fn failed_add_readback_removes_app_and_command_files_and_retains_saved_state() {
     let (_temp, mut m) = setup();
     m.refresh().unwrap();
+    m.manage().unwrap();
     let saved = fs::read(&m.config).unwrap();
     let application = m.config.with_file_name("excluded.desktop");
     fs::write(&application, desktop("Excluded app", "OnlyShowIn=GNOME;\n")).unwrap();

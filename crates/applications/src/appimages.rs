@@ -711,6 +711,19 @@ impl AppImages {
         self.touch();
         Ok(())
     }
+    pub fn manage(&self) -> Result<(), String> {
+        if !self
+            .0
+            .paths
+            .config
+            .try_exists()
+            .map_err(|e| e.to_string())?
+        {
+            self.save(|_| ())?;
+        }
+        Ok(())
+    }
+
     fn entries(&self) -> Vec<(PathBuf, Vec<(String, String)>)> {
         let mut entries = fs::read_dir(&self.0.paths.applications)
             .into_iter()
@@ -814,6 +827,12 @@ impl AppImages {
         json!({"id": id, "availability": "available", "value": value, "state": state})
     }
     pub fn set(&self, id: &str, value: &str) -> Result<Value, String> {
+        let state = self.set_inner(id, value)?;
+        self.manage()?;
+        Ok(state)
+    }
+
+    fn set_inner(&self, id: &str, value: &str) -> Result<Value, String> {
         match id {
             INSTALL => self.install(value),
             CHECK => self.start(value, Mode::Check, false),
@@ -1343,6 +1362,15 @@ impl AppImages {
     }
     /// Called periodically by the service; attempts are spaced so failures do not hammer servers.
     pub fn auto_tick(&self) {
+        match self.0.paths.config.try_exists() {
+            Ok(true) => (),
+            Ok(false) => return,
+            Err(error) => {
+                *self.0.config_error.lock().unwrap() = Some(error.to_string());
+                self.touch();
+                return;
+            }
+        }
         let prefs = self.0.prefs.lock().unwrap().clone();
         let mut attempt = self.0.last_attempt.lock().unwrap();
         if due(&prefs, *attempt, now()) {
@@ -1407,6 +1435,17 @@ fn refresh_desktop_database(applications: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn unmanaged_auto_tick_never_starts_work_or_saves_preferences() {
+        let root = tempfile::tempdir().unwrap();
+        let apps = manager(root.path());
+        apps.auto_tick();
+        assert_eq!(*apps.0.last_attempt.lock().unwrap(), 0);
+        assert!(!apps.0.paths.config.exists());
+        apps.manage().unwrap();
+        assert!(apps.0.paths.config.is_file());
+    }
+
     #[test]
     fn managed_launchers_require_a_real_library_image_as_the_executable() {
         let root = tempfile::tempdir().unwrap();

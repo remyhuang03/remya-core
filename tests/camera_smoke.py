@@ -9,8 +9,8 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-BUS = 'top.remya.settings.Service1'
-API = 'top.remya.settings.Settings1'
+BUS = 'top.remya.Core1'
+API = 'top.remya.Core1'
 
 def run(*args, ok=True):
     p = subprocess.run(args, capture_output=True, text=True, timeout=30)
@@ -24,7 +24,7 @@ def check(profile, cli):
         children.append(p)
         return p
     def dbus(method, *args, ok=True):
-        output = run('gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/settings', '--method', f'{API}.{method}', *args, ok=ok)
+        output = run('gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/Core1', '--method', f'{API}.{method}', *args, ok=ok)
         return json.loads(ast.literal_eval(output)[0]) if ok else output
     def command(*args, ok=True):
         output = run(cli, *args, ok=ok)
@@ -35,7 +35,7 @@ def check(profile, cli):
         while not (Path(os.environ['XDG_RUNTIME_DIR']) / 'pipewire-0').exists():
             assert time.monotonic() < deadline
             time.sleep(.05)
-        start(str(ROOT / f'target/{profile}/remya-settings-service'))
+        start(str(ROOT / f'target/{profile}/remyad'))
         while True:
             try:
                 state = dbus('Get', 'cameras')
@@ -44,7 +44,7 @@ def check(profile, cli):
                 assert time.monotonic() < deadline
                 time.sleep(.1)
         signals = tempfile.TemporaryFile(mode='w+t')
-        monitor = subprocess.Popen(['gdbus', 'monitor', '--session', '--dest', BUS, '--object-path', '/top/remya/settings'], stdout=signals, stderr=subprocess.DEVNULL)
+        monitor = subprocess.Popen(['gdbus', 'monitor', '--session', '--dest', BUS, '--object-path', '/top/remya/Core1'], stdout=signals, stderr=subprocess.DEVNULL)
         children.append(monitor)
         time.sleep(.15)
         assert state == command('get', 'cameras')
@@ -60,7 +60,9 @@ def check(profile, cli):
         for page in ['pen', 'pen-shortcuts', 'recovery']:
             assert 'Unknown page' in command('get', f'page:{page}', ok=False)
         assert command('get', 'configuration')['cameras']['devices'] == []
-        config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/cameras.toml'
+        config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/cameras.toml'
+        assert not config.exists()
+        assert command('manage', 'cameras') == dbus('Get', 'cameras')
         assert config.exists()
         signals.seek(0)
         assert "Changed ('cameras'" in signals.read(), 'Missing camera change notification'
@@ -80,7 +82,7 @@ def main():
         check(sys.argv[2], sys.argv[3]); return
     profile = sys.argv[1] if len(sys.argv)>1 else 'debug'
     assert profile in ('debug', 'release')
-    cli = ROOT / 'build/linux/x64/release/bundle/libexec/remya_settings_cli'
+    cli = ROOT / 'target/release/remya'
     with tempfile.TemporaryDirectory(prefix='remya-camera-api-') as tmp:
         env = os.environ.copy()
         env.update(HOME=tmp, XDG_CONFIG_HOME=f'{tmp}/config', XDG_DATA_HOME=f'{tmp}/data', XDG_STATE_HOME=f'{tmp}/state', XDG_CACHE_HOME=f'{tmp}/cache', XDG_RUNTIME_DIR=tmp, PIPEWIRE_RUNTIME_DIR=tmp, PIPEWIRE_REMOTE='pipewire-0', GSETTINGS_BACKEND='keyfile', HYPRLAND_INSTANCE_SIGNATURE='', DBUS_SYSTEM_BUS_ADDRESS=f'unix:path={tmp}/no-system-bus')

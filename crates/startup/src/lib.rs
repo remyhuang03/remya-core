@@ -1,7 +1,7 @@
 //! XDG autostart overrides and enabled-state reconciliation for UWSM sessions.
 mod systemd;
 use gio::glib::{self, KeyFile, KeyFileFlags};
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -352,7 +352,7 @@ impl<S: Systemd> Startup<S> {
                     )
                 })
                 .collect();
-            if loaded.as_ref() != Some(&adopted) {
+            if loaded.is_some() && loaded.as_ref() != Some(&adopted) {
                 self.persist(&adopted)?;
             }
             self.saved = Some(adopted);
@@ -361,6 +361,19 @@ impl<S: Systemd> Startup<S> {
         self.read_error = result.as_ref().err().cloned();
         result
     }
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.config.try_exists().map_err(|e| e.to_string())? {
+            self.persist(
+                self.saved
+                    .as_ref()
+                    .ok_or("Startup entries cannot be detected")?,
+            )?;
+        }
+        Ok(())
+    }
+
     fn conflicts(&self) -> Vec<Value> {
         self.entries
             .iter()
@@ -383,7 +396,7 @@ impl<S: Systemd> Startup<S> {
         self.refresh()?;
         let query = query.to_lowercase();
         Ok(
-            json!({"applications":remya_settings_applications::desktop_applications().into_iter()
+            json!({"applications":remya_applications::desktop_applications().into_iter()
             .filter(|a| validate_id(&a.id).is_ok() && !self.system.contains_key(&a.id)
                 && (a.name.to_lowercase().contains(&query) || a.id.to_lowercase().contains(&query)))
             .map(|a| json!({"id":a.id,"name":a.name,"icon":a.icon})).collect::<Vec<_>>()}),

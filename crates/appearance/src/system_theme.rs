@@ -1,6 +1,6 @@
-use crate::api::{SystemThemeMode, SystemThemeState, ThemeTargetResult, ThemeTargetStatus};
 use crate::environment::Environment;
 use crate::files::{FileChange, key_file, read_optional};
+use crate::{SystemThemeMode, SystemThemeState, ThemeTargetResult, ThemeTargetStatus};
 use gio::glib::{self, variant::ToVariant};
 use gio::prelude::*;
 use std::env;
@@ -80,7 +80,7 @@ impl Context {
     }
 
     pub fn lock(&self) -> Result<File, String> {
-        let directory = self.config.join("remya/settings");
+        let directory = self.config.join("remya/shared");
         fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
         let lock = OpenOptions::new()
             .read(true)

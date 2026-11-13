@@ -3,7 +3,7 @@
 //! localed owns `/etc/locale.conf`; Settings keeps its own copy in `language.toml`
 //! for reconciliation. Writes need root, so the service sends the assignments from
 //! [`Language::plan`] to its privileged process, which calls [`write_locale`].
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, fs, path::PathBuf, process::Command};
@@ -191,10 +191,7 @@ impl<S: System> Language<S> {
                 Some(validate(&prefs, &self.installed)?)
             }
             // First use adopts what the system does now and changes nothing.
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.save(&observed)?;
-                Some(observed.clone())
-            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(observed.clone()),
             Err(e) => return Err(format!("{}: {e}", self.path.display())),
         };
         self.observed = Some(observed);
@@ -205,6 +202,19 @@ impl<S: System> Language<S> {
         let result = self.read();
         self.error = result.as_ref().err().cloned();
         result
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.path.try_exists().map_err(|e| e.to_string())? {
+            self.save(
+                self.saved
+                    .as_ref()
+                    .ok_or("System language cannot be detected")?,
+            )?;
+        }
+        Ok(())
     }
 
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
@@ -634,6 +644,8 @@ mod tests {
         assert_eq!(state["formats"]["LC_TIME"], "zh_CN.UTF-8");
         assert_eq!(state["formats"]["LC_NUMERIC"], "");
         assert_eq!(state["conflict"], false);
+        assert!(!dir.path().join("language.toml").exists());
+        language.manage().unwrap();
         assert!(dir.path().join("language.toml").exists());
         // Detection failures leave the feature uninitialized.
         let (dir, _, mut unset) = setup(&["LC_TIME=C"]);
@@ -702,6 +714,7 @@ mod tests {
     fn conflicts_block_writes_until_resolved_either_way() {
         let (_, fake, mut language) = setup(&["LANG=en_US.UTF-8"]);
         language.refresh().unwrap();
+        language.manage().unwrap();
         localed(
             &fake,
             &["LANG=de_DE.UTF-8".into(), "LC_TIME=zh_CN.UTF-8".into()],

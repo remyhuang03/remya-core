@@ -73,12 +73,7 @@ fn firmware_date(raw: &str) -> Result<String, String> {
     {
         return Err("Invalid firmware date; expected MM/DD/YYYY".into());
     }
-    remya_settings_date_time::format_calendar_date(&format!(
-        "{}-{}-{}",
-        &raw[6..10],
-        &raw[..2],
-        &raw[3..5]
-    ))
+    remya_date_time::format_calendar_date(&format!("{}-{}-{}", &raw[6..10], &raw[..2], &raw[3..5]))
 }
 
 fn field(result: Result<String, String>) -> Value {

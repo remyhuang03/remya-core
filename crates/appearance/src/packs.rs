@@ -4,13 +4,13 @@
 //! The selection is stored by GNOME's interface settings, which GTK and Hyprland
 //! (`cursor:sync_gsettings_theme`) follow; Settings keeps its own copy in
 //! `themes.toml` for reconciliation and writes the documented toolkit settings too.
-use crate::api::{ThemeTargetResult, ThemeTargetStatus};
 use crate::files::FileChange;
 use crate::system_theme::{AppearancePlan, Context, result, setting_change};
+use crate::{ThemeTargetResult, ThemeTargetStatus};
 use base64::Engine;
 use gio::glib::{self, variant::ToVariant};
 use gio::prelude::*;
-use remya_settings_display::{Hyprctl, atomic_write, run_bytes};
+use remya_display::{Hyprctl, atomic_write, run_bytes};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
@@ -1013,10 +1013,9 @@ impl ThemePacks {
             Ok(text) => Some(
                 toml::from_str(&text).map_err(|e| format!("{}: {e}", self.saved_path.display()))?,
             ),
-            // First use saves what the system uses now and changes nothing.
+            // Until managed, the snapshot follows the live system.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let system = system.clone()?;
-                self.save(&system)?;
                 Some(system)
             }
             Err(e) => return Err(format!("{}: {e}", self.saved_path.display())),
@@ -1028,6 +1027,19 @@ impl ThemePacks {
         let result = self.read();
         self.error = result.as_ref().err().cloned();
         result
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.saved_path.try_exists().map_err(|e| e.to_string())? {
+            self.save(
+                self.saved
+                    .as_ref()
+                    .ok_or("System themes cannot be detected")?,
+            )?;
+        }
+        Ok(())
     }
 
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
@@ -1226,7 +1238,10 @@ impl ThemePacks {
 
     pub fn set(&mut self, id: &str, input: &str) -> Result<Value, String> {
         let value: Value = serde_json::from_str(input).map_err(|_| invalid("Expected JSON"))?;
-        let result = self.change(id, &value);
+        let result = self.change(id, &value).and_then(|_| {
+            self.manage()?;
+            Ok(self.state())
+        });
         if let Err(error) = &result
             && !error.starts_with("InvalidArgument:")
         {

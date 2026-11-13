@@ -9,13 +9,13 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICE = ROOT / 'target/debug/remya-settings-service'
-CLI = ROOT / 'build/linux/x64/release/bundle/libexec/remya_settings_cli'
+SERVICE = ROOT / 'target/debug/remyad'
+CLI = ROOT / 'target/release/remya'
 
 
 def call(method, *args, ok=True):
-    result = subprocess.run(['gdbus', 'call', '--session', '--dest', 'top.remya.settings.Service1',
-        '--object-path', '/top/remya/settings', '--method', f'top.remya.settings.Settings1.{method}',
+    result = subprocess.run(['gdbus', 'call', '--session', '--dest', 'top.remya.Core1',
+        '--object-path', '/top/remya/Core1', '--method', f'top.remya.Core1.{method}',
         *args], capture_output=True, text=True, timeout=10)
     assert (result.returncode == 0) == ok, (result.stdout, result.stderr)
     return json.loads(ast.literal_eval(result.stdout)[0]) if ok else result.stderr
@@ -101,7 +101,7 @@ def schedule_checks():
         assert not state['busy']
         assert not cli('set', 'updates.automatic', 'false')['schedule']['enabled']
         stop(service); service = None
-        configuration = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/updates.json'
+        configuration = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/updates.json'
         configuration.write_text('{broken configuration')
         service, state = launch()
         assert state['schedule']['error'] and state['schedule']['editable'] is False

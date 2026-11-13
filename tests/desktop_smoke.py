@@ -6,7 +6,7 @@ cursor options, cursor and icon themes, and text size.
 Uses a nested compositor, a private session bus and isolated XDG roots, so the
 user's Hyprland configuration is never touched.
 
-    python test/desktop_smoke.py [path/to/remya-settings-service]
+    python test/desktop_smoke.py [path/to/remyad]
 """
 import json
 import os
@@ -18,9 +18,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVICE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "target/debug/remya-settings-service"
-DEST = ("--session", "--dest", "top.remya.settings.Service1", "--object-path", "/top/remya/settings")
-METHOD = "top.remya.settings.Settings1."
+SERVICE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "target/debug/remyad"
+DEST = ("--session", "--dest", "top.remya.Core1", "--object-path", "/top/remya/Core1")
+METHOD = "top.remya.Core1."
 MAIN = 'hl.config({ misc = { disable_hyprland_logo = true, disable_splash_rendering = true } })\n' \
     'hl.bind("SUPER + Q", hl.dsp.window.close(), { description = "Window: Close" })\n' \
     'hl.bind("SUPER + J", hl.dsp.exec_cmd("true"))\n'
@@ -345,7 +345,7 @@ def main():
         assert call("Get", "text-size.scale")["value"] == 1.25
         run("gsettings", "set", "org.gnome.desktop.interface", "text-scaling-factor", "1.5", env=env)
         call("Resolve", "text-size", "system")
-        assert "text_scaling_factor = 1.5" in (config / "remya/settings/text-size.toml").read_text()
+        assert "text_scaling_factor = 1.5" in (config / "remya/system/text-size.toml").read_text()
 
         # Desktop files never hold shortcuts; a hand-edited file blocks writes.
         owned.write_text(owned.read_text() + 'hl.bind("SUPER + K", hl.dsp.window.close())\n')

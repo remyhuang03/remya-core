@@ -1,7 +1,7 @@
 """CLI/D-Bus Sound parity on private buses/audio; never touches desktop audio.
 
 Usage: python test/sound_smoke.py [debug|release]
-Requires a compiled Rust service and a Linux bundle containing the generic CLI.
+Requires a compiled Rust service and the standalone release CLI.
 """
 import ast
 from contextlib import ExitStack
@@ -14,8 +14,8 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-BUS = 'top.remya.settings.Service1'
-API = 'top.remya.settings.Settings1'
+BUS = 'top.remya.Core1'
+API = 'top.remya.Core1'
 
 
 def run(*args, ok=True):
@@ -26,7 +26,7 @@ def run(*args, ok=True):
 
 def dbus(method, *args):
     result = run('gdbus', 'call', '--session', '--dest', BUS,
-                 '--object-path', '/top/remya/settings', '--method', f'{API}.{method}', *args)
+                 '--object-path', '/top/remya/Core1', '--method', f'{API}.{method}', *args)
     return json.loads(ast.literal_eval(result)[0])
 
 
@@ -60,7 +60,7 @@ def check(profile, cli):
         time.sleep(0.2)
         for name in ('remya_api_a', 'remya_api_b'):
             run('pactl', 'load-module', 'module-null-sink', f'sink_name={name}')
-        service = start(str(ROOT / f'target/{profile}/remya-settings-service'))
+        service = start(str(ROOT / f'target/{profile}/remyad'))
         def ready():
             try:
                 return dbus('Get', 'sound')['available']
@@ -80,7 +80,7 @@ def check(profile, cli):
         assert 'InvalidArgument' in command('set', 'sound.output-volume', '{"percent":151}', ok=False)
         signals = processes.enter_context(tempfile.TemporaryFile(mode='w+t'))
         start('gdbus', 'monitor', '--session', '--dest', BUS,
-              '--object-path', '/top/remya/settings', stdout=signals)
+              '--object-path', '/top/remya/Core1', stdout=signals)
         time.sleep(0.1)
         for method, setting, body in (
             ('Set', 'sound.output-device', {'name': 'remya_api_b'}),
@@ -129,15 +129,15 @@ def check(profile, cli):
         assert 'Unknown feature' in command('resolve', 'sound', 'settings', ok=False)
         assert 'Unknown feature' in command('resolve', 'sound', 'system', ok=False)
         error = run('gdbus', 'call', '--session', '--dest', BUS,
-                    '--object-path', '/top/remya/settings', '--method', f'{API}.Resolve',
+                    '--object-path', '/top/remya/Core1', '--method', f'{API}.Resolve',
                     'sound', 'settings', ok=False)
         assert 'Unknown feature' in error, error
-        config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/sound.toml'
+        config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/sound.toml'
         assert not config.exists(), config
         # Restart only the private Settings service, retaining the live audio server.
         service.terminate()
         service.wait(timeout=5)
-        start(str(ROOT / f'target/{profile}/remya-settings-service'))
+        start(str(ROOT / f'target/{profile}/remyad'))
         wait(ready)
         assert command('get', 'sound')['system'] == live['system']
         assert not config.exists(), config
@@ -153,10 +153,8 @@ def main():
         return
     profile = sys.argv[1] if len(sys.argv) > 1 else 'debug'
     assert profile in ('debug', 'release')
-    cli = ROOT / f'build/linux/x64/{profile}/bundle/libexec/remya_settings_cli'
-    if not cli.exists():
-        cli = ROOT / 'build/linux/x64/release/bundle/libexec/remya_settings_cli'
-    assert cli.exists(), 'Build a Linux bundle to supply the generic CLI'
+    cli = ROOT / 'target/release/remya'
+    assert cli.exists(), 'Compile target/release/remya first'
     with tempfile.TemporaryDirectory(prefix='remya-sound-api-') as tmp:
         root = Path(tmp)
         env = os.environ.copy()

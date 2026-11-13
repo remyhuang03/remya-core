@@ -1,6 +1,6 @@
 //! Edit only timeouts in unambiguous listener blocks; commands stay byte-for-byte intact.
 use gio::glib::variant::ToVariant;
-use remya_settings_display::{atomic_write, run_bytes};
+use remya_display::{atomic_write, run_bytes};
 use std::time::Duration;
 use std::{
     path::{Path, PathBuf},
@@ -35,10 +35,10 @@ fn general(text: &str) -> Result<Option<(usize, usize)>, String> {
                 return Err("Ambiguous general sections".into());
             }
             start = Some(offset);
-        } else if clean == "}" {
-            if let Some(s) = start.take() {
-                found = Some((s, offset + line.len()));
-            }
+        } else if clean == "}"
+            && let Some(s) = start.take()
+        {
+            found = Some((s, offset + line.len()));
         }
         offset += line.len();
     }
@@ -64,10 +64,10 @@ fn listeners(text: &str) -> Result<Vec<(usize, usize, &str)>, String> {
                 return Err("Nested listeners".into());
             }
             start = Some(offset);
-        } else if clean == "}" {
-            if let Some(s) = start.take() {
-                result.push((s, offset + line.len(), &text[s..offset + line.len()]));
-            }
+        } else if clean == "}"
+            && let Some(s) = start.take()
+        {
+            result.push((s, offset + line.len(), &text[s..offset + line.len()]));
         }
         offset += line.len();
     }

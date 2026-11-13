@@ -1,3 +1,4 @@
 [D-BUS Service]
-Name=top.remya.settings.Service1
-Exec=remya_settings --service
+Name=top.remya.Core1
+Exec=@REMYAD@
+SystemdService=top.remya.core.service

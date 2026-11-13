@@ -62,8 +62,8 @@ on every startup.
 ## Battery history
 
 SQLite 3 through MIT-licensed rusqlite stores append-only observations permanently:
-`$XDG_STATE_HOME/remya/settings/power.sqlite3`, defaulting to
-`~/.local/state/remya/settings/power.sqlite3`. Debug uses the repository config
+`$XDG_STATE_HOME/remya/core/power.sqlite3`, defaulting to
+`~/.local/state/remya/core/power.sqlite3`. Debug uses the repository `config/state/`
 directory. WAL and SHM files belong beside the database. No automatic retention
 limit is applied. Query ranges and page sizes bound memory use.
 

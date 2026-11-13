@@ -26,8 +26,8 @@ WIRELESS = f'{DEVICE}.Wireless'
 ACTIVE = f'{NM}.Connection.Active'
 AP = f'{NM}.AccessPoint'
 CONNECTION = f'{NM}.Settings.Connection'
-BUS = 'top.remya.settings.Service1'
-INTERFACE = 'top.remya.settings.Settings1'
+BUS = 'top.remya.Core1'
+INTERFACE = 'top.remya.Core1'
 XML = f'''<node>
 <interface name="org.freedesktop.DBus.ObjectManager">
   <method name="GetManagedObjects"><arg type="a{{oa{{sa{{sv}}}}}}" direction="out"/></method></interface>
@@ -284,7 +284,7 @@ def stub():
 
 def call(method, *args, ok=True):
     result = subprocess.run(
-        ['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/settings',
+        ['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/Core1',
          '--method', f'{INTERFACE}.{method}', *args], capture_output=True, text=True, timeout=30)
     if not ok:
         assert result.returncode != 0, (args, result.stdout)
@@ -441,7 +441,7 @@ def session(binary, root):
     service = subprocess.Popen([binary, '--debug-root', root])
     try:
         for _ in range(50):
-            if subprocess.run(['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/settings',
+            if subprocess.run(['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/Core1',
                                '--method', f'{INTERFACE}.Get', 'about'], capture_output=True).returncode == 0:
                 break
             time.sleep(0.1)
@@ -459,7 +459,7 @@ def session(binary, root):
     assert len(emitted) > 10 and not any(
         secret in m for m in emitted
         for secret in ('right-password', 'wrong-password', 'another-password', 'hotspot-secret'))
-    assert 'password' not in (Path(root) / 'config/network.toml').read_text()
+    assert 'password' not in (Path(root) / 'config/system/network.toml').read_text()
 
 
 def main():
@@ -470,7 +470,7 @@ def main():
         session(sys.argv[2], sys.argv[3])
         return
     profile = sys.argv[1] if len(sys.argv) > 1 else 'debug'
-    binary = ROOT / 'target' / profile / 'remya-settings-service'
+    binary = ROOT / 'target' / profile / 'remyad'
     with tempfile.TemporaryDirectory(prefix='remya-network-smoke-') as root:
         (Path(root) / 'config').mkdir()
         address = f'unix:path={root}/system-bus'

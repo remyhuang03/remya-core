@@ -12,16 +12,16 @@ use serde_json::{Value, json};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex},
     time::{Duration, Instant, SystemTime},
 };
 
 pub const PROVIDERS: &str = "ai.providers";
 pub const PROVIDER_PREFIX: &str = "ai.provider/";
-pub const BAR: &str = "ai.bar";
 pub const CREDENTIAL: &str = "ai.credential";
 pub const CUSTOM: &str = "ai.custom";
 /// Settable ids; each Set emits Changed for its own id and for `ai.providers`.
-pub const SET_IDS: [&str; 4] = [PROVIDERS, BAR, CREDENTIAL, CUSTOM];
+pub const SET_IDS: [&str; 3] = [PROVIDERS, CREDENTIAL, CUSTOM];
 
 const TTL: Duration = Duration::from_secs(5 * 60);
 const SOURCES: &[&str] = &["auto", "web", "cli", "oauth", "api"];
@@ -46,10 +46,18 @@ struct Snapshot {
     usage: Vec<Value>,
 }
 
+type Models = (Instant, Status, Option<Arc<Value>>);
+
+type RunProbe = dyn Fn(&Path) -> Result<(Option<String>, Vec<Value>), String> + Send + Sync;
+
 pub struct Ai {
     prefs: PathBuf,
-    probe: Option<Probe>,
-    models: Option<(Instant, Status, Option<Value>)>,
+    cache: PathBuf,
+    // The generation prevents an old in-flight probe from undoing a Set invalidation.
+    probe: Mutex<(u64, Option<Arc<Probe>>)>,
+    models: Mutex<Option<Models>>,
+    writes: Mutex<()>,
+    run_probe: Box<RunProbe>,
 }
 
 /// Removes account e-mail addresses at any depth before usage leaves CodexBar.
@@ -274,52 +282,67 @@ fn check_secret(secret: &str) -> Result<(), String> {
 }
 
 impl Ai {
-    pub fn new(prefs: PathBuf) -> Self {
+    pub fn new(prefs: PathBuf, cache: PathBuf) -> Self {
         Self {
             prefs,
-            probe: None,
-            models: None,
+            cache,
+            probe: Mutex::new((0, None)),
+            models: Mutex::new(None),
+            writes: Mutex::new(()),
+            run_probe: Box::new(|path| {
+                let version = codexbar::version()?;
+                let usage = if version.is_some() {
+                    codexbar::probe(path)?
+                } else {
+                    Vec::new()
+                };
+                Ok((version, usage))
+            }),
         }
     }
 
-    fn probe(&mut self, path: &Path) -> Result<&Probe, String> {
-        if self
-            .probe
-            .as_ref()
-            .is_none_or(|probe| probe.at.elapsed() >= TTL)
+    fn probe(&self, path: &Path) -> Result<Arc<Probe>, String> {
+        let generation = {
+            let cache = self.probe.lock().unwrap();
+            if let Some(probe) = &cache.1
+                && probe.at.elapsed() < TTL
+            {
+                return Ok(probe.clone());
+            }
+            cache.0
+        };
+        let (version, mut usage) = (self.run_probe)(path)?;
+        usage.iter_mut().for_each(strip_email);
+        let probe = Arc::new(Probe {
+            at: Instant::now(),
+            updated_at: now_iso(),
+            version,
+            usage,
+        });
+        let mut cache = self.probe.lock().unwrap();
+        if cache.0 == generation {
+            cache.1 = Some(probe.clone());
+        }
+        Ok(probe)
+    }
+
+    fn models_dev(&self) -> (Status, Option<Arc<Value>>) {
         {
-            let version = codexbar::version()?;
-            let mut usage = match version {
-                Some(_) => codexbar::probe(path)?,
-                None => Vec::new(),
-            };
-            usage.iter_mut().for_each(strip_email);
-            self.probe = Some(Probe {
-                at: Instant::now(),
-                updated_at: now_iso(),
-                version,
-                usage,
-            });
+            let cache = self.models.lock().unwrap();
+            if let Some((at, status, value)) = &*cache
+                && at.elapsed() < TTL
+            {
+                return (*status, value.clone());
+            }
         }
-        Ok(self.probe.as_ref().expect("probe cached"))
+        let (status, value) =
+            models_dev::resolve(Some(&self.cache), SystemTime::now(), models_dev::fetch);
+        let value = value.map(Arc::new);
+        *self.models.lock().unwrap() = Some((Instant::now(), status, value.clone()));
+        (status, value)
     }
 
-    fn models_dev(&mut self) -> (Status, Option<&Value>) {
-        if self
-            .models
-            .as_ref()
-            .is_none_or(|(at, ..)| at.elapsed() >= TTL)
-        {
-            let cache = models_dev::cache_path();
-            let (status, value) =
-                models_dev::resolve(cache.as_deref(), SystemTime::now(), models_dev::fetch);
-            self.models = Some((Instant::now(), status, value));
-        }
-        let (_, status, value) = self.models.as_ref().expect("models cached");
-        (*status, value.as_ref())
-    }
-
-    fn snapshot(&mut self) -> Result<Snapshot, String> {
+    fn snapshot(&self) -> Result<Snapshot, String> {
         let prefs = Prefs::load(&self.prefs)?;
         let path = codexbar::config_path()?;
         let probe = self.probe(&path)?;
@@ -352,14 +375,13 @@ impl Ai {
             usage: &usage,
             automatic,
             custom: &custom,
-            models_dev,
+            models_dev: models_dev.as_deref(),
         });
         let value = json!({
             "codexbar":{"available":version.is_some(),"version":version},
             "updatedAt":updated_at,
             "providers":visible,
             "catalog":catalog,
-            "bar":Self::bar_json(&prefs.bar),
         });
         Ok(Snapshot {
             value,
@@ -369,30 +391,16 @@ impl Ai {
         })
     }
 
-    fn reply(&mut self) -> Result<Value, String> {
+    fn reply(&self) -> Result<Value, String> {
         let value = self.snapshot()?.value;
         Ok(json!({"id":PROVIDERS,"availability":"available","value":value}))
     }
 
-    fn bar_json(bar: &prefs::Bar) -> Value {
-        json!({
-            "pinned": bar.pinned,
-            "lowPercent": bar.low_percent,
-            "showUsed": bar.show_used,
-            "ringOrder": bar.ring_order,
-        })
-    }
-
     pub fn is_get(key: &str) -> bool {
-        key == PROVIDERS || key == BAR || key.starts_with(PROVIDER_PREFIX)
+        key == PROVIDERS || key.starts_with(PROVIDER_PREFIX)
     }
 
-    pub fn get(&mut self, key: &str) -> Result<Value, String> {
-        if key == BAR {
-            let bar = Prefs::load(&self.prefs)?.bar;
-            return Ok(json!({"id":BAR,"availability":"available",
-                "value":Self::bar_json(&bar)}));
-        }
+    pub fn get(&self, key: &str) -> Result<Value, String> {
         let Some(id) = key.strip_prefix(PROVIDER_PREFIX) else {
             return self.reply();
         };
@@ -412,7 +420,7 @@ impl Ai {
         let (status, catalog) = self.models_dev();
         let entry = models_dev_id
             .as_deref()
-            .and_then(|id| catalog.map(|catalog| &catalog[id]))
+            .and_then(|id| catalog.as_deref().map(|catalog| &catalog[id]))
             .filter(|entry| entry.is_object());
         Ok(json!({"id":key,"availability":"available","value":{
             "provider":provider,"usage":usage,
@@ -422,16 +430,20 @@ impl Ai {
         }}))
     }
 
-    pub fn set(&mut self, key: &str, request: &str) -> Result<Value, String> {
-        match key {
-            PROVIDERS => self.set_provider(request)?,
-            // Pins change no CodexBar state, so the usage probe stays valid.
-            BAR => return self.set_bar(request).and_then(|()| self.reply()),
-            CREDENTIAL => self.set_credential(request)?,
-            CUSTOM => self.set_custom(request)?,
-            _ => return Err(invalid("Unknown setting")),
+    pub fn set(&self, key: &str, request: &str) -> Result<Value, String> {
+        {
+            let _write = self.writes.lock().unwrap();
+            let result = match key {
+                PROVIDERS => self.set_provider(request),
+                CREDENTIAL => self.set_credential(request),
+                CUSTOM => self.set_custom(request),
+                _ => return Err(invalid("Unknown setting")),
+            };
+            result?;
+            let mut cache = self.probe.lock().unwrap();
+            cache.0 += 1;
+            cache.1 = None;
         }
-        self.probe = None;
         self.reply()
     }
 
@@ -449,7 +461,7 @@ impl Ai {
         Ok((automatic, rows, row))
     }
 
-    fn set_provider(&mut self, request: &str) -> Result<(), String> {
+    fn set_provider(&self, request: &str) -> Result<(), String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Change {
@@ -510,49 +522,7 @@ impl Ai {
         Ok(())
     }
 
-    fn set_bar(&mut self, request: &str) -> Result<(), String> {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields, rename_all = "camelCase")]
-        struct Change {
-            pinned: Option<Vec<String>>,
-            low_percent: Option<i64>,
-            show_used: Option<bool>,
-            ring_order: Option<prefs::RingOrder>,
-        }
-        let change: Change = serde_json::from_str(request)
-            .ok()
-            .filter(|c: &Change| {
-                c.pinned.is_some()
-                    || c.low_percent.is_some()
-                    || c.show_used.is_some()
-                    || c.ring_order.is_some()
-            })
-            .ok_or_else(|| invalid("Expected one of pinned, lowPercent, showUsed or ringOrder"))?;
-        let mut prefs = Prefs::load(&self.prefs)?;
-        if let Some(low) = change.low_percent {
-            prefs.bar.low_percent = prefs::validate_low_percent(low).map_err(|e| invalid(&e))?;
-        }
-        if let Some(show_used) = change.show_used {
-            prefs.bar.show_used = show_used;
-        }
-        if let Some(ring_order) = change.ring_order {
-            prefs.bar.ring_order = ring_order;
-        }
-        if let Some(pinned) = change.pinned {
-            prefs::validate_pinned(&pinned).map_err(|e| invalid(&e))?;
-            let visible = self.snapshot()?.visible;
-            if !pinned
-                .iter()
-                .all(|id| visible.iter().any(|row| row["id"] == id.as_str()))
-            {
-                return Err(invalid("Only visible providers can be pinned"));
-            }
-            prefs.bar.pinned = pinned;
-        }
-        prefs.save(&self.prefs)
-    }
-
-    fn set_credential(&mut self, request: &str) -> Result<(), String> {
+    fn set_credential(&self, request: &str) -> Result<(), String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
         struct Change {
@@ -632,7 +602,7 @@ impl Ai {
         Ok(())
     }
 
-    fn set_custom(&mut self, request: &str) -> Result<(), String> {
+    fn set_custom(&self, request: &str) -> Result<(), String> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields, rename_all = "camelCase")]
         struct Add {
@@ -658,7 +628,6 @@ impl Ai {
             if prefs.custom.len() == before {
                 return Err(invalid("Unknown custom provider"));
             }
-            prefs.bar.pinned.retain(|pinned| *pinned != id);
             secrets::clear(&id)?;
             return prefs.save(&self.prefs);
         }
@@ -830,10 +799,136 @@ mod tests {
     }
 
     #[test]
+    fn app_preferences_complete_while_ai_probes_and_system_work_are_blocked() {
+        use crate::{paths::Roots, state::State};
+        use std::{fs, sync::mpsc, thread};
+
+        let root = tempfile::tempdir().unwrap();
+        let roots = Roots::detect(Some(root.path().into())).unwrap();
+        // A fresh on-disk models.dev cache keeps this test entirely offline.
+        fs::create_dir_all(&roots.cache).unwrap();
+        fs::write(roots.cache.join("models-dev.json"), "{}").unwrap();
+        let data = root.path().join("data");
+        fs::create_dir_all(data.join("remya/apps")).unwrap();
+        fs::write(
+            data.join("remya/apps/remya-bar.json"),
+            json!({
+                "version":1,"id":"remya-bar","app":"top.remya.bar","title":"Bar",
+                "icon":"top.remya.bar","config":"bar",
+                "pages":[{"id":"clock","title":"Clock","keywords":[]}],
+                "settings":{"clock-seconds":{"title":"Seconds","page":"clock","keywords":[],
+                    "default":false,"schema":{"type":"boolean"}}}
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let mut state = State::new(roots);
+        state.requests.apps = Arc::new(Mutex::new(remya_app_preferences::Store::new(
+            root.path().join("config"),
+            vec![data],
+            Default::default(),
+            remya_display::atomic_write,
+        )));
+        let (entered, started) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let wait = Mutex::new(wait);
+        Arc::get_mut(&mut state.requests.ai).unwrap().run_probe = Box::new(move |_| {
+            entered.send(()).unwrap();
+            wait.lock().unwrap().recv().unwrap();
+            Ok((None, vec![]))
+        });
+        let requests = state.requests.clone();
+        let state = Arc::new(Mutex::new(state));
+        let mut probes = Vec::new();
+        // Both probes must enter: neither may hold the AI cache lock while waiting.
+        for _ in 0..2 {
+            let requests = requests.clone();
+            let state = state.clone();
+            probes.push(thread::spawn(move || {
+                requests.execute(&state, "Get", &[PROVIDERS.into()])
+            }));
+            started.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        let system_work = state.lock().unwrap();
+        let (finished, result) = mpsc::channel();
+        let app_state = state.clone();
+        let app_requests = requests.clone();
+        let app = thread::spawn(move || {
+            let key = "remya-bar.clock-seconds".to_string();
+            let get = app_requests
+                .execute(&app_state, "Get", std::slice::from_ref(&key))
+                .unwrap()
+                .unwrap();
+            let set = app_requests
+                .execute(&app_state, "Set", &[key.clone(), "true".into()])
+                .unwrap()
+                .unwrap();
+            let replace = app_requests
+                .execute(
+                    &app_state,
+                    "Replace",
+                    &[
+                        key,
+                        "false".into(),
+                        set["revision"].as_str().unwrap().into(),
+                    ],
+                )
+                .unwrap()
+                .unwrap();
+            finished.send((get, set, replace)).unwrap();
+        });
+        let reply = result.recv_timeout(Duration::from_secs(2));
+        drop(system_work);
+        release.send(()).unwrap();
+        release.send(()).unwrap();
+        app.join().unwrap();
+        for probe in probes {
+            probe.join().unwrap().unwrap().unwrap();
+        }
+        let (get, set, replace) = reply.expect("app preferences waited for AI or State");
+        assert_eq!(get["value"], false);
+        assert_eq!(set["value"], true);
+        assert_eq!(replace["value"], false);
+        // The completed probe is reused for five minutes rather than running again.
+        requests
+            .execute(&state, "Get", &[PROVIDERS.into()])
+            .unwrap()
+            .unwrap();
+        assert!(started.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_probe_started_before_invalidation_cannot_repopulate_the_cache() {
+        use std::{sync::mpsc, thread};
+        let root = tempfile::tempdir().unwrap();
+        let mut ai = Ai::new(root.path().join("ai.toml"), root.path().join("models.json"));
+        let (entered, started) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let wait = Mutex::new(wait);
+        ai.run_probe = Box::new(move |_| {
+            entered.send(()).unwrap();
+            wait.lock().unwrap().recv().unwrap();
+            Ok((None, vec![]))
+        });
+        let ai = Arc::new(ai);
+        let worker = ai.clone();
+        let probe = thread::spawn(move || worker.probe(Path::new("unused")));
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        {
+            let mut cache = ai.probe.lock().unwrap();
+            cache.0 += 1;
+            cache.1 = None;
+        }
+        release.send(()).unwrap();
+        probe.join().unwrap().unwrap();
+        assert!(ai.probe.lock().unwrap().1.is_none());
+    }
+
+    #[test]
     fn custom_add_validates_url_and_unique_id() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("remya-ai.toml");
-        let mut ai = Ai::new(path.clone());
+        let path = directory.path().join("ai.toml");
+        let ai = Ai::new(path.clone(), directory.path().join("models-dev.json"));
         let add = |name: &str, url: &str| json!({"add":{"name":name,"baseUrl":url}}).to_string();
         ai.set_custom(&add("My Endpoint", "https://api.example.com/v1"))
             .unwrap();
@@ -862,26 +957,5 @@ mod tests {
         assert!(check_secret("").is_err());
         assert!(check_secret("a\nb").is_err());
         assert!(check_secret(&"a".repeat(MAX_SECRET + 1)).is_err());
-    }
-
-    #[test]
-    fn bar_prefs_support_show_used_and_ring_order() {
-        let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("remya-ai.toml");
-        let mut ai = Ai::new(path.clone());
-        let initial = ai.get(BAR).unwrap();
-        assert_eq!(
-            initial["value"],
-            json!({"pinned":[],"lowPercent":20,"showUsed":false,"ringOrder":"5h-outer"})
-        );
-        ai.set_bar(r#"{"showUsed":true,"ringOrder":"5h-inner"}"#)
-            .unwrap();
-        let updated = ai.get(BAR).unwrap();
-        assert_eq!(
-            updated["value"],
-            json!({"pinned":[],"lowPercent":20,"showUsed":true,"ringOrder":"5h-inner"})
-        );
-        assert!(ai.set_bar(r#"{"ringOrder":"unknown"}"#).is_err());
-        assert!(ai.set_bar(r"{}").is_err());
     }
 }

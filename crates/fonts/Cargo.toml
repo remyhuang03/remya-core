@@ -1,12 +1,12 @@
 [package]
-name = "remya_settings_fonts"
+name = "remya_fonts"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
 license.workspace = true
 
 [dependencies]
-remya_settings_display = { path = "../display" }
+remya_display = { path = "../display" }
 serde_json = "1"
 xdg = "3"
 

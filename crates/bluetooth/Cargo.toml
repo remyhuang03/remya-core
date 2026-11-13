@@ -1,5 +1,5 @@
 [package]
-name = "remya_settings_bluetooth"
+name = "remya_bluetooth"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

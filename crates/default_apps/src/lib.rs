@@ -2,7 +2,7 @@
 mod mimeapps;
 
 use gio::prelude::*;
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -99,7 +99,7 @@ fn validate_desktop(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub use remya_settings_applications::Application;
+pub use remya_applications::Application;
 pub trait Desktop: Send {
     fn applications(&self) -> Result<Vec<Application>, String>;
     fn handler(&self, _id: &str, _mime: &str) -> Option<Application> {
@@ -115,7 +115,7 @@ pub struct RealDesktop;
 impl Desktop for RealDesktop {
     fn applications(&self) -> Result<Vec<Application>, String> {
         mimeapps::check_association_files()?;
-        let apps = remya_settings_applications::desktop_applications()
+        let apps = remya_applications::desktop_applications()
             .into_iter()
             .filter(|a| validate_desktop(&a.id).is_ok())
             .map(|mut a| {
@@ -294,7 +294,6 @@ impl<D: Desktop> DefaultApps<D> {
             if let Some(saved) = loaded {
                 self.saved = Some(saved);
             } else {
-                self.persist(&self.system)?;
                 self.saved = Some(self.system.clone());
             }
             Ok(())
@@ -302,6 +301,19 @@ impl<D: Desktop> DefaultApps<D> {
         self.read_error = result.as_ref().err().cloned();
         result
     }
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.path.try_exists().map_err(|e| e.to_string())? {
+            self.persist(
+                self.saved
+                    .as_ref()
+                    .ok_or("Default apps cannot be detected")?,
+            )?;
+        }
+        Ok(())
+    }
+
     fn conflict(&self) -> bool {
         self.saved
             .as_ref()
@@ -531,6 +543,7 @@ impl<D: Desktop> DefaultApps<D> {
                         .map(|(t, a)| (t.clone(), a.clone()))
                         .collect();
                     self.apply(&targets)?;
+                    self.manage()?;
                 }
                 _ => return Err(invalid("Unknown resolution")),
             }
@@ -630,6 +643,7 @@ mod tests {
             .values
             .insert("text/plain".into(), "a.desktop".into());
         manager.refresh().unwrap();
+        manager.manage().unwrap();
         assert_eq!(machine.lock().unwrap().writes, 0);
         assert_eq!(manager.state()["saved"]["text/plain"], "a.desktop");
         machine

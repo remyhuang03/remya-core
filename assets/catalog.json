@@ -294,12 +294,6 @@
       "icon": "power"
     },
     {
-      "id": "notifications",
-      "title": "Notifications",
-      "description": "App and system alerts, do not disturb and focus sessions",
-      "icon": "notifications"
-    },
-    {
       "id": "devices",
       "title": "Bluetooth & devices",
       "description": "Connecting devices, inputs and peripherals",
@@ -379,35 +373,6 @@
               "availability": "available",
               "reason": "Tracking and credentials are shared with CodexBar.",
               "value": "CodexBar"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "ai-usage",
-      "category": "ai",
-      "title": "Usage",
-      "description": "Providers shown in the Remy'a Bar quota pill and low-quota alerts",
-      "preview": "none",
-      "availability": "available",
-      "reason": "Remy'a Bar reads these preferences from Settings.",
-      "children": [],
-      "sources": [
-        "app-appearance"
-      ],
-      "windowsUris": [],
-      "sections": [
-        {
-          "title": "Remy'a Bar",
-          "controls": [
-            {
-              "id": "ai.bar",
-              "title": "Quota pill",
-              "type": "info",
-              "availability": "available",
-              "reason": "Remy'a Bar shows up to three pinned providers.",
-              "value": "Remy'a Bar"
             }
           ]
         }
@@ -2119,67 +2084,6 @@
       "children": []
     },
     {
-      "id": "clipboard",
-      "category": "system",
-      "title": "Clipboard",
-      "description": "Remya Launcher clipboard history and retention",
-      "preview": "none",
-      "availability": "available",
-      "reason": "Read and manage clipboard history policy through Remya Launcher.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [
-        "ms-settings:clipboard"
-      ],
-      "sections": [
-        {
-          "title": "Remya Launcher history",
-          "controls": [
-            {
-              "id": "clipboard.history-enabled",
-              "title": "Clipboard history",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Record new items in Remya Launcher. Turning this off keeps the existing history.",
-              "value": false
-            },
-            {
-              "id": "clipboard.max-items",
-              "title": "Maximum history items",
-              "type": "text",
-              "availability": "available",
-              "reason": "A lower limit immediately removes the oldest unpinned items above the limit.",
-              "value": "",
-              "min": 1,
-              "max": 5000,
-              "unit": "items"
-            },
-            {
-              "id": "clipboard.retention-days",
-              "title": "Retention period",
-              "type": "text",
-              "availability": "available",
-              "reason": "A shorter period immediately removes unpinned items older than the new limit.",
-              "value": "",
-              "min": 1,
-              "max": 365,
-              "unit": "days"
-            },
-            {
-              "id": "clipboard.clear-history",
-              "title": "Clear clipboard history",
-              "type": "action",
-              "availability": "available",
-              "reason": "Remove every saved item, including pinned items, from Remya Launcher.",
-              "value": "Clear history"
-            }
-          ]
-        }
-      ],
-      "children": []
-    },
-    {
       "id": "presence",
       "category": "system",
       "title": "Presence sensing",
@@ -3043,87 +2947,7 @@
       "children": []
     },
     {
-      "id": "notifications",
-      "category": "notifications",
-      "title": "Notifications",
-      "description": "Sounds, Do Not Disturb and popups",
-      "preview": "none",
-      "availability": "available",
-      "reason": "Applies to the notifications shown by Remy'a Bar, the desktop notification service.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [
-        "ms-settings:notifications"
-      ],
-      "sections": [
-        {
-          "title": "Do not disturb",
-          "controls": [
-            {
-              "id": "notifications.do-not-disturb",
-              "title": "Do not disturb",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Hide notification popups and sounds. Critical notifications and priority notifications still show; history keeps everything.",
-              "value": false
-            },
-            {
-              "id": "notifications.automatic-dnd",
-              "title": "Turn on Do Not Disturb automatically",
-              "type": "action",
-              "availability": "available",
-              "reason": "Open the schedule and full screen conditions.",
-              "value": "Open"
-            },
-            {
-              "id": "notifications.priority",
-              "title": "Set priority notifications",
-              "type": "action",
-              "availability": "available",
-              "reason": "Choose calls and apps that break through Do Not Disturb.",
-              "value": "Open"
-            }
-          ]
-        },
-        {
-          "title": "Popups",
-          "controls": [
-            {
-              "id": "notifications.popup-duration",
-              "title": "Popup duration",
-              "type": "choice",
-              "availability": "available",
-              "reason": "How long popups stay when the sender does not set a duration. Critical notifications stay until closed.",
-              "options": [
-                "3 seconds",
-                "5 seconds",
-                "8 seconds",
-                "10 seconds",
-                "15 seconds",
-                "30 seconds"
-              ],
-              "value": "5 seconds"
-            },
-            {
-              "id": "notifications.sounds",
-              "title": "Play sounds",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Play the sound a notification requests, or the theme's message sound. Senders can ask for silence.",
-              "value": true
-            }
-          ]
-        }
-      ],
-      "children": [
-        "quiet-schedule",
-        "priority-notifications"
-      ]
-    },
-    {
       "id": "focus",
-      "category": "notifications",
       "title": "Focus",
       "description": "Focus periods and reducing distractions",
       "preview": "none",
@@ -3195,119 +3019,8 @@
           ]
         }
       ],
-      "children": []
-    },
-    {
-      "id": "quiet-schedule",
-      "category": "notifications",
-      "title": "Automatic Do Not Disturb",
-      "description": "Schedule and full screen conditions",
-      "preview": "none",
-      "availability": "available",
-      "reason": "Turns on Do Not Disturb automatically for Remy'a Bar notifications.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [
-        "ms-settings:quietmomentsscheduled",
-        "ms-settings:quietmomentspresentation",
-        "ms-settings:quietmomentsgame"
-      ],
-      "sections": [
-        {
-          "title": "Schedule",
-          "controls": [
-            {
-              "id": "quiet-schedule.enabled",
-              "title": "During these times",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Turn on Do Not Disturb between the start and end times.",
-              "value": false
-            },
-            {
-              "id": "quiet-schedule.start",
-              "title": "Start time",
-              "type": "text",
-              "availability": "available",
-              "reason": "24-hour time, such as 22:00.",
-              "value": "22:00"
-            },
-            {
-              "id": "quiet-schedule.end",
-              "title": "End time",
-              "type": "text",
-              "availability": "available",
-              "reason": "24-hour time; earlier than the start ends on the next day.",
-              "value": "07:00"
-            },
-            {
-              "id": "quiet-schedule.repeat",
-              "title": "Repeat",
-              "type": "choice",
-              "availability": "available",
-              "reason": "Days on which the schedule starts.",
-              "options": [
-                "Every day",
-                "Weekdays",
-                "Weekends"
-              ],
-              "value": "Every day"
-            }
-          ]
-        },
-        {
-          "title": "Conditions",
-          "controls": [
-            {
-              "id": "quiet-schedule.fullscreen",
-              "title": "When an app is full screen",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Turn on Do Not Disturb while any display shows a full screen window.",
-              "value": false
-            }
-          ]
-        }
-      ],
-      "children": []
-    },
-    {
-      "id": "priority-notifications",
-      "category": "notifications",
-      "title": "Priority notification",
-      "description": "Calls and apps that break through Do Not Disturb",
-      "preview": "none",
-      "availability": "available",
-      "reason": "Priority notifications still pop up and play sounds while Do Not Disturb is on.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [],
-      "sections": [
-        {
-          "title": "Priority",
-          "controls": [
-            {
-              "id": "priority-notifications.calls",
-              "title": "Incoming calls",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Show call notifications (category call.incoming) during Do Not Disturb.",
-              "value": true
-            },
-            {
-              "id": "priority-notifications.apps",
-              "title": "Priority apps",
-              "type": "action",
-              "availability": "available",
-              "reason": "Apps whose notifications show during Do Not Disturb.",
-              "value": "Manage"
-            }
-          ]
-        }
-      ],
-      "children": []
+      "children": [],
+      "category": "system"
     },
     {
       "id": "bluetooth",
@@ -9018,7 +8731,7 @@
       "description": "Text size, visual effects, magnifier, color filters and contrast themes",
       "preview": "none",
       "availability": "planned",
-      "reason": "GNOME text scaling factor is implemented in Rust through flutter_rust_bridge; operations use live gsettings readback. Other vision controls remain unimplemented previews.",
+      "reason": "GNOME text scaling factor is implemented by the Rust backend; operations use live gsettings readback. Other vision controls remain unimplemented previews.",
       "children": [
         "fonts"
       ],
@@ -10601,123 +10314,6 @@
               "availability": "available",
               "reason": "Open installed LocalSend to share files with nearby devices. LocalSend manages its own configuration; the entry is hidden when it is not installed.",
               "value": "Open"
-            }
-          ]
-        }
-      ],
-      "children": []
-    },
-    {
-      "id": "remya-bar",
-      "category": "appearance",
-      "title": "Remy'a Bar",
-      "description": "Pills, clock and app tray",
-      "preview": "none",
-      "availability": "available",
-      "reason": "Configure the pills, clock and app tray in Remy'a Bar.",
-      "sources": [
-        "app-appearance"
-      ],
-      "windowsUris": [],
-      "sections": [
-        {
-          "title": "Pills",
-          "controls": [
-            {
-              "id": "remya-bar.layout",
-              "title": "Pill layout",
-              "type": "action",
-              "availability": "available",
-              "reason": "Arrange, group, show or hide bar pills and set their options, including the media title marquee.",
-              "value": "Edit"
-            }
-          ]
-        },
-        {
-          "title": "Pill options",
-          "controls": [
-            {
-              "id": "remya-bar.clock-seconds",
-              "title": "Show seconds",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Show seconds in the bar clock.",
-              "value": true
-            }
-          ]
-        },
-        {
-          "title": "App tray",
-          "controls": [
-            {
-              "id": "remya-bar.folded-apps",
-              "title": "Folded apps",
-              "type": "action",
-              "availability": "available",
-              "reason": "Manage which app icons are folded in the tray.",
-              "value": "Manage"
-            }
-          ]
-        },
-        {
-          "title": "On-screen keyboard",
-          "controls": [
-            {
-              "id": "remya-bar.keyboard-preview",
-              "title": "Show touch key previews",
-              "type": "toggle",
-              "availability": "available",
-              "reason": "Show a character preview when pressing a key on a touchscreen.",
-              "value": true
-            }
-          ]
-        },
-        {
-          "title": "On-screen display",
-          "controls": [
-            {
-              "id": "remya-bar.volume-step",
-              "title": "Volume step size",
-              "type": "slider",
-              "availability": "available",
-              "reason": "Percentage changed by each volume shortcut step.",
-              "min": 1,
-              "max": 25,
-              "unit": "%",
-              "value": 5
-            },
-            {
-              "id": "remya-bar.volume-max",
-              "title": "Maximum volume",
-              "type": "slider",
-              "availability": "available",
-              "reason": "Highest output volume reachable from the bar. Above 100% boosts and may distort.",
-              "min": 100,
-              "max": 150,
-              "unit": "%",
-              "value": 150
-            },
-            {
-              "id": "remya-bar.brightness-step",
-              "title": "Brightness step size",
-              "type": "slider",
-              "availability": "available",
-              "reason": "Percentage changed by each brightness or gamma shortcut step.",
-              "min": 1,
-              "max": 25,
-              "unit": "%",
-              "value": 5
-            },
-            {
-              "id": "remya-bar.gamma-min",
-              "title": "Minimum gamma",
-              "type": "slider",
-              "availability": "available",
-              "reason": "Lowest software gamma level reached after hardware brightness hits its minimum.",
-              "min": 10,
-              "max": 90,
-              "unit": "%",
-              "value": 10
             }
           ]
         }

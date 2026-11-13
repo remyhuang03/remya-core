@@ -6,7 +6,7 @@ use gio::{
     prelude::*,
 };
 pub use keep_awake::ID as KEEP_AWAKE;
-use remya_settings_display::{Compositor, Hyprctl, atomic_write, brightness::BrightnessBackend};
+use remya_display::{Compositor, Hyprctl, atomic_write, brightness::BrightnessBackend};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{collections::HashMap, path::PathBuf};
@@ -259,6 +259,9 @@ impl Power {
         }
     }
     fn persist_runtime(&self) -> Result<(), String> {
+        if !self.file.try_exists().map_err(|e| e.to_string())? {
+            return Ok(());
+        }
         let value = Runtime {
             restore: self.restore.clone(),
             manual_restore: self.manual_restore.clone(),
@@ -300,17 +303,16 @@ impl Power {
         if self.invalid_config {
             return Err("Power configuration is unreadable; preserve it for repair".into());
         }
-        if let Some(s) = &self.saved {
-            if !["power-saver", "balanced", "performance"].contains(&s.profile.as_str())
+        if let Some(s) = &self.saved
+            && (!["power-saver", "balanced", "performance"].contains(&s.profile.as_str())
                 || !s.valid_thresholds()
                 || s.timeouts.screen > 86400
                 || s.timeouts.sleep > 86400
-                || s.timeouts.lock > 86400
-            {
-                return Err("Invalid saved power configuration".into());
-            }
+                || s.timeouts.lock > 86400)
+        {
+            return Err("Invalid saved power configuration".into());
         }
-        if self.saved.is_none() {
+        if !self.file.try_exists().map_err(|e| e.to_string())? {
             if self.invalid_config {
                 return Err("Power configuration is unreadable; preserve it for repair".into());
             }
@@ -323,16 +325,27 @@ impl Power {
                 include_ac: false,
                 dim: false,
             };
-            self.persist(&s)?;
             self.saved = Some(s);
         }
-        if self.restore.is_some() && active != "power-saver" {
+        if self.file.try_exists().map_err(|e| e.to_string())?
+            && self.restore.is_some()
+            && active != "power-saver"
+        {
             self.restore = None;
             self.manual = true;
             self.adjust_brightness(false)?;
         }
         Ok(())
     }
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.file.try_exists().map_err(|e| e.to_string())? {
+            self.persist(self.saved.as_ref().ok_or("Power cannot be detected")?)?;
+        }
+        Ok(())
+    }
+
     fn conflict(&self) -> bool {
         self.saved.as_ref().is_some_and(|s| {
             let expected = if self.restore.is_some() {
@@ -517,23 +530,23 @@ impl Power {
                 .filter(|m| m.name.starts_with("eDP-") || m.name.starts_with("LVDS-"))
             {
                 let b = backend.read(&m.name, &outputs);
-                if b.backend == Some("backlight") {
-                    if let Some(original) = b.percent {
-                        let wanted = (original * 70 / 100).max(1);
-                        let actual = backend.set(&m.name, &outputs, wanted)?;
-                        self.dimmed.push((m.name.clone(), original, actual));
-                    }
+                if b.backend == Some("backlight")
+                    && let Some(original) = b.percent
+                {
+                    let wanted = (original * 70 / 100).max(1);
+                    let actual = backend.set(&m.name, &outputs, wanted)?;
+                    self.dimmed.push((m.name.clone(), original, actual));
                 }
             }
         } else if !dim {
             let mut remaining = vec![];
             let mut failure = None;
             for (output, original, actual) in self.dimmed.drain(..) {
-                if backend.read(&output, &outputs).percent == Some(actual) {
-                    if let Err(e) = backend.set(&output, &outputs, original) {
-                        remaining.push((output, original, actual));
-                        failure = Some(e);
-                    }
+                if backend.read(&output, &outputs).percent == Some(actual)
+                    && let Err(e) = backend.set(&output, &outputs, original)
+                {
+                    remaining.push((output, original, actual));
+                    failure = Some(e);
                 }
             }
             self.dimmed = remaining;
@@ -545,10 +558,10 @@ impl Power {
     }
     pub fn sleep(&mut self, sleeping: bool) {
         self.sleeping = sleeping;
-        if let Some(h) = &mut self.history {
-            if let Err(e) = h.sleeping(sleeping) {
-                self.history_error = Some(e)
-            }
+        if let Some(h) = &mut self.history
+            && let Err(e) = h.sleeping(sleeping)
+        {
+            self.history_error = Some(e)
         }
     }
     pub fn tick(&mut self) {
@@ -571,19 +584,22 @@ impl Power {
             }
             _ => "unknown",
         };
-        if let Some(h) = &mut self.history {
-            if let Err(e) = h.observe(screen, b) {
-                self.history_error = Some(e)
-            }
+        if let Some(h) = &mut self.history
+            && let Err(e) = h.observe(screen, b)
+        {
+            self.history_error = Some(e)
         }
-        if self.ticks.is_multiple_of(10) {
-            if let Err(e) = self.automatic().and_then(|_| self.persist_runtime()) {
-                self.error = Some(e)
-            }
+        if self.ticks.is_multiple_of(10)
+            && let Err(e) = self.automatic().and_then(|_| self.persist_runtime())
+        {
+            self.error = Some(e)
         }
     }
     fn automatic(&mut self) -> Result<(), String> {
         self.refresh()?;
+        if !self.file.try_exists().map_err(|e| e.to_string())? {
+            return Ok(());
+        }
         if self.conflict() {
             return Ok(());
         }
@@ -611,12 +627,10 @@ impl Power {
             set_profile("power-saver")?;
             self.restore = Some(previous);
             self.adjust_brightness(true)?;
-        } else if !condition {
-            if let Some(previous) = self.restore.clone() {
-                set_profile(&previous)?;
-                self.restore = None;
-                self.adjust_brightness(false)?;
-            }
+        } else if !condition && let Some(previous) = self.restore.clone() {
+            set_profile(&previous)?;
+            self.restore = None;
+            self.adjust_brightness(false)?;
         }
         self.adjust_brightness(profile()?.0 == "power-saver")?;
         Ok(())

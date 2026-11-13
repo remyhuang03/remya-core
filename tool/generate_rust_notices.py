@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 import re
 import subprocess
-from urllib.parse import urljoin, urlparse, unquote
 
 root = Path(__file__).resolve().parents[1]
 metadata = json.loads(subprocess.check_output([
@@ -24,7 +23,7 @@ while pending:
     pending.extend(dependency["pkg"] for dependency in nodes[package_id]["deps"])
 
 # CDLA-Permissive-2.0 covers webpki-roots' certificate data, which ureq's rustls TLS bundles.
-allowed = {"MIT", "Apache-2.0", "ISC", "BSD-2-Clause", "BSD-3-Clause", "0BSD",
+allowed = {"MIT-0", "MIT", "Apache-2.0", "ISC", "BSD-2-Clause", "BSD-3-Clause", "0BSD",
            "Unlicense", "Unicode-3.0", "Zlib", "CC0-1.0", "BSL-1.0", "LLVM-exception",
            "CDLA-Permissive-2.0"}
 notices = ["Rust backend third-party notices\n",
@@ -35,22 +34,19 @@ notices = ["Rust backend third-party notices\n",
 count = 0
 for package in sorted((packages[item] for item in included if item not in backends),
                       key=lambda item: (item["name"], item["version"])):
-    # This release declares license-file rather than an SPDX expression.
-    reviewed_file_licenses = {('allo-isolate', '0.1.27'): 'Apache-2.0'}
-    expression = package["license"] or reviewed_file_licenses.get((package['name'], package['version']))
+    expression = package["license"]
     identifiers = set(re.findall(r"[A-Za-z0-9][A-Za-z0-9.+-]*", expression or "")) - {"AND", "OR", "WITH"}
     assert identifiers and identifiers <= allowed, f"Review license: {package['name']} {expression}"
     directory = Path(package["manifest_path"]).parent
     files = sorted(file for file in directory.iterdir() if file.is_file()
                    and file.name.upper().startswith(('LICENSE', 'LICENCE', 'NOTICE', 'COPYRIGHT', 'COPYING')))
-    if package['name'] in {'flutter_rust_bridge', 'flutter_rust_bridge_macros'}:
-        assert package['version'] == '2.13.0'
-        config_path = root / '.dart_tool/package_config.json'
-        dart_packages = json.loads(config_path.read_text())['packages']
-        bridge = next(item for item in dart_packages if item['name'] == 'flutter_rust_bridge')
-        dart_root = Path(unquote(urlparse(urljoin(config_path.as_uri(), bridge['rootUri'])).path))
-        assert re.search(r'^version: 2\.13\.0$', (dart_root / 'pubspec.yaml').read_text(), re.MULTILINE)
-        files.append(dart_root / 'LICENSE')
+    if package['name'] in {'jsonschema-regex', 'jsonschema-value'}:
+        # Workspace crates omit the repository's MIT license in their tarballs.
+        assert package['version'] == '0.61.2'
+        files.append(root / 'tool/licenses/jsonschema-0.61.2/LICENSE')
+    if package['name'] in {'uuid-simd', 'vsimd'}:
+        assert package['version'] == '0.8.0'
+        files.append(root / 'tool/licenses/simd-d74c030d9dc4f3cae02146d1f497ff62726ef09a/LICENSE')
     if package['name'] == 'cookie-factory':
         # crates.io omits LICENSE; retained from its recorded upstream revision.
         assert package['version'] == '0.3.3'
@@ -59,8 +55,6 @@ for package in sorted((packages[item] for item in included if item not in backen
         # The crates.io package omits the upstream license files; these come from its release tag.
         assert package['version'] == '0.25.5'
         files.extend(sorted((root / 'tool/licenses/backhand-0.25.5').iterdir()))
-    if package['name'] == 'dart-sys':
-        files.append(directory / 'dart-sdk/LICENSE')
     if package['license_file']:
         declared = directory / package['license_file']
         assert declared.is_file(), str(declared)

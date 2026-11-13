@@ -1,6 +1,6 @@
 //! Installed fonts through fontconfig. Writes touch only the user's font directory;
 //! the font list is a live observation, so there is nothing to save or reconcile.
-use remya_settings_display::{atomic_write, run_bytes};
+use remya_display::{atomic_write, run_bytes};
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},

@@ -2,7 +2,7 @@ use gio::{
     glib::{self, KeyFile, KeyFileFlags, MainContext},
     prelude::*,
 };
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use std::{
     cell::Cell,
     collections::BTreeSet,

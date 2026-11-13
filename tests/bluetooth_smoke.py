@@ -23,10 +23,10 @@ DEVICE = f'{BLUEZ}.Device1'
 AGENT = f'{BLUEZ}.Agent1'
 A = '/org/bluez/hci0'
 D = f'{A}/dev_AA_BB_CC_DD_EE_FF'
-BUS = 'top.remya.settings.Service1'
+BUS = 'top.remya.Core1'
 USE_CLI = False
 CLI = None
-API = 'top.remya.settings.Settings1'
+API = 'top.remya.Core1'
 XML = f'''<node>
 <interface name="org.freedesktop.DBus.ObjectManager"><method name="GetManagedObjects"><arg type="a{{oa{{sa{{sv}}}}}}" direction="out"/></method></interface>
 <interface name="org.bluez.AgentManager1"><method name="RegisterAgent"><arg type="o"/><arg type="s"/></method></interface>
@@ -229,7 +229,7 @@ class Stub:
 
 
 def call(method, *args, ok=True):
-    command = [str(CLI), method.lower(), *args] if USE_CLI else ['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/settings', '--method', f'{API}.{method}', *args]
+    command = [str(CLI), method.lower(), *args] if USE_CLI else ['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/Core1', '--method', f'{API}.{method}', *args]
     result = subprocess.run(command, capture_output=True, text=True, timeout=15)
     assert (result.returncode == 0) == ok, (method, args, result.stdout, result.stderr)
     return json.loads(result.stdout if USE_CLI else ast.literal_eval(result.stdout)[0]) if ok else result.stderr
@@ -373,13 +373,13 @@ def checks(timers):
 def session(binary, root, timers):
     global USE_CLI, CLI
     profile = Path(binary).parent.name
-    CLI = ROOT / f'build/linux/x64/{profile}/bundle/libexec/remya_settings_cli'
+    CLI = ROOT / 'target/release/remya'
     assert CLI.is_file(), 'Build the Flutter bundle before testing CLI parity'
     assert os.environ['DBUS_SYSTEM_BUS_ADDRESS'].startswith('unix:path=' + root)
     service = subprocess.Popen([binary, '--debug-root', root], stdout=subprocess.DEVNULL)
     try:
         for _ in range(100):
-            result = subprocess.run(['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/settings',
+            result = subprocess.run(['gdbus', 'call', '--session', '--dest', BUS, '--object-path', '/top/remya/Core1',
                                      '--method', f'{API}.Get', 'about'], capture_output=True)
             if result.returncode == 0:
                 break
@@ -430,7 +430,7 @@ def main():
         time.sleep(.4)
         try:
             subprocess.run(['dbus-run-session', '--', sys.executable, __file__, '--session',
-                            str(ROOT / 'target' / profile / 'remya-settings-service'), root,
+                            str(ROOT / 'target' / profile / 'remyad'), root,
                             *(['--timers'] if '--timers' in sys.argv else [])], env=environment, check=True, timeout=200)
         finally:
             stub.terminate()

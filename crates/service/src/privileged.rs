@@ -1,4 +1,4 @@
-use remya_settings_date_time::api as clock;
+use remya_date_time as clock;
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
@@ -11,10 +11,10 @@ pub enum Request {
         uninstalled: bool,
     },
     RemovePackages {
-        packages: Vec<remya_settings_storage::packages::Package>,
+        packages: Vec<remya_storage::packages::Package>,
     },
     Uninstall {
-        removal: remya_settings_applications::Removal,
+        removal: remya_applications::Removal,
     },
     Hostname {
         expected_static: String,
@@ -79,30 +79,27 @@ pub fn serve() -> Result<(), String> {
         let result = request.map_err(|e| e.to_string()).and_then(|request| {
             let state = match request {
                 Request::PackageCache { keep, uninstalled } => {
-                    return remya_settings_storage::packages::clean_cache(
-                        &remya_settings_storage::packages::RealProcess,
+                    return remya_storage::packages::clean_cache(
+                        &remya_storage::packages::RealProcess,
                         keep,
                         uninstalled,
                     );
                 }
                 Request::RemovePackages { packages } => {
-                    return remya_settings_storage::packages::remove_packages(
-                        &remya_settings_storage::packages::RealProcess,
+                    return remya_storage::packages::remove_packages(
+                        &remya_storage::packages::RealProcess,
                         &packages,
                     );
                 }
                 Request::Uninstall { removal } => {
-                    return remya_settings_applications::uninstall(&removal, true);
+                    return remya_applications::uninstall(&removal, true);
                 }
                 Request::Hostname {
                     expected_static,
                     hostname,
                 } => {
-                    return remya_settings_system_information::hostname::apply(
-                        &expected_static,
-                        &hostname,
-                    )
-                    .and_then(|state| serde_json::to_value(state).map_err(|e| e.to_string()));
+                    return remya_system_information::hostname::apply(&expected_static, &hostname)
+                        .and_then(|state| serde_json::to_value(state).map_err(|e| e.to_string()));
                 }
                 Request::Timezone { timezone } => clock::set_timezone(timezone),
                 Request::Manual {
@@ -112,7 +109,7 @@ pub fn serve() -> Result<(), String> {
                 Request::Automatic { enabled } => clock::set_automatic_time(enabled),
                 Request::Servers { servers } => clock::set_time_servers(servers),
                 Request::Language { values } => {
-                    return remya_settings_date_time::language::write_locale(&values)
+                    return remya_date_time::language::write_locale(&values)
                         .map(|_| serde_json::Value::Null);
                 }
                 Request::Sync {} => clock::sync_now(),
@@ -218,7 +215,7 @@ mod tests {
     fn framing_and_whitelist() {
         let request = Request::RemovePackages {
             packages: (0..500)
-                .map(|i| remya_settings_storage::packages::Package {
+                .map(|i| remya_storage::packages::Package {
                     name: format!("package-{i:03}"),
                     version: "1.0.0-1".into(),
                 })

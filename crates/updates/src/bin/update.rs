@@ -1,5 +1,5 @@
 //! Root-owned system updater, started by the Settings service through pkexec.
-use remya_settings_updates::{UPDATER_VERSION, updater};
+use remya_updates::{UPDATER_VERSION, updater};
 use std::os::unix::process::CommandExt;
 
 fn main() {

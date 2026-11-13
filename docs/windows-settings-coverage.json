@@ -208,12 +208,6 @@
       "title": "Visual Effects"
     },
     {
-      "uri": "ms-settings:quietmomentsgame",
-      "page": "quiet-schedule",
-      "sourceCategory": "Gaming",
-      "title": "Playing a game full screen"
-    },
-    {
       "uri": "ms-settings:network-status",
       "page": "network-status",
       "sourceCategory": "Network and internet",
@@ -406,12 +400,6 @@
       "title": "Battery use"
     },
     {
-      "uri": "ms-settings:clipboard",
-      "page": "clipboard",
-      "sourceCategory": "System",
-      "title": "Clipboard"
-    },
-    {
       "uri": "ms-settings:display",
       "page": "display",
       "sourceCategory": "System",
@@ -422,18 +410,6 @@
       "page": "display",
       "sourceCategory": "System",
       "title": "Display"
-    },
-    {
-      "uri": "ms-settings:quietmomentspresentation",
-      "page": "quiet-schedule",
-      "sourceCategory": "System",
-      "title": "Duplicating my display"
-    },
-    {
-      "uri": "ms-settings:quietmomentsscheduled",
-      "page": "quiet-schedule",
-      "sourceCategory": "System",
-      "title": "During these hours"
     },
     {
       "uri": "ms-settings:deviceencryption",
@@ -470,12 +446,6 @@
       "page": "projection",
       "sourceCategory": "System",
       "title": "Projecting to this PC"
-    },
-    {
-      "uri": "ms-settings:notifications",
-      "page": "notifications",
-      "sourceCategory": "System",
-      "title": "Notifications & actions"
     },
     {
       "uri": "ms-settings:remotedesktop",

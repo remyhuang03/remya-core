@@ -1,5 +1,5 @@
 [package]
-name = "remya_settings_display"
+name = "remya_display"
 autobins = false
 version.workspace = true
 edition.workspace = true

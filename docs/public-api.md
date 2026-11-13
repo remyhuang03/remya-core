@@ -1,34 +1,65 @@
 # Public application API
 
-Remya Settings owns configuration, defaults, validation, persistence, and system
-operations. GUI, CLI, and D-Bus calls use the same `AppPreferencesController` and
-Rust appearance backend. Remya Bar is a separate application and a runtime client
-of Settings; it must not import Settings pages or system-writing implementations.
+Remya Core owns system operations, validation, persistence and the resident
+Rust daemon `remyad`. The Flutter Settings GUI and other apps are clients.
 
 ## Identity and installation
 
 | Item | Value |
 | --- | --- |
-| Executable | `remya_settings` |
-| Desktop/application ID | `top.remya.settings` |
-| Session bus service | `top.remya.settings.Service1` |
-| Object path | `/top/remya/settings` |
-| Versioned interface | `top.remya.settings.Settings1` |
+| Daemon / CLI | `remyad` / `remya` |
+| Session bus name / interface | `top.remya.Core1` |
+| Object path | `/top/remya/Core1` |
+| User unit | `top.remya.core.service` |
 
-Build with `fvm flutter build linux --release`, then run `python tool/install.py`.
-The installer registers the desktop entry and D-Bus activation file in XDG data
-locations and creates `~/.local/bin/remya_settings`. Add `~/.local/bin` to PATH if
-needed. It refuses to replace an unrelated command or update a running installed
-bundle. It never writes application or desktop configuration.
+See [XDG layout](xdg-layout.md) for release builds, installation and manual file moves.
+The daemon is a Flutter-free binary. D-Bus activation and the graphical session
+user unit start it without a window. `Open` resolves the independent Settings GUI
+through `top.remya.settings.desktop` or `remya_settings` on PATH, starting it with
+`--gui <page>`. Missing GUI returns `Unavailable:Remya Settings is not installed`.
+`Close` calls its `org.gtk.Actions` close action; Core remains resident.
 
-The native executable routes CLI arguments to a bundled standalone Dart client
-before GTK initialization. `--help` therefore needs no display or running service.
-Operations use the current user's session bus. The service is activated on demand
-with `remya_settings --service`, runs the ordinary-user Rust service in a
-hidden Flutter view, and requires the user's graphical session. It does not open
-a window until requested. Closing the settings window hides it so bar clients can
-continue using the service; `quit` stops it. Another dependent client may activate
-it again. No Hyprland autostart or user desktop configuration is changed.
+## Application preferences
+
+Applications install strict version-1 registrations under `remya/apps/<id>.json`
+in XDG data roots. See [app preferences](app-preferences.md#application-owned-preferences)
+for the format and validation rules. Core contains no app-specific schemas.
+
+`Get("<id>.<key>")` returns `{id, availability: "available", value, revision}`.
+`Set(id, json)` validates and atomically persists the value, returns that Get
+payload, and emits `Changed(id, payload)`. Revision is the lowercase SHA-256 of
+the effective JSON value serialized with sorted object keys. `Replace(id, json,
+revision)` performs the same write only if the revision still matches; a mismatch
+returns `top.remya.Core1.OperationFailed` with `Changed in another view. Reopen
+the editor.`. Comparison and writing are serialized with all daemon requests.
+Use Replace for editors that must detect concurrent changes. JSON null (including
+nested nulls), integers outside TOML range and other non-TOML values return
+`InvalidArgument`. Missing keys return registered defaults without creating files.
+A stored value that fails its current schema makes only that key fail Get. A
+malformed TOML file blocks all reads and writes to that file and is left intact.
+Uninstalled or invalid registrations return `Unavailable`; their settings remain
+on disk. Registrations refresh every 30 seconds and on unknown app prefixes.
+
+`List` includes `apps: [{id, app, title, icon, pages, error?}]` on every page,
+including rejected files. Invalid metadata may be null and pages empty. Valid app
+settings also appear in the paginated controls. CLI list retains the apps array.
+`Search` includes app settings and pages, matching titles and keywords. Each app
+result carries `{app, page}` where `app` is the **registration id**; pass those
+fields directly to OpenApp. The registration `app` field is the desktop id.
+
+`OpenApp` requires a registered id and a registered page (or an empty page). It
+reads the first `applications/<desktop-id>.desktop` in XDG precedence order with
+GLib KeyFile and uses `[Desktop Action settings]` Exec. Field codes are removed
+(`%%` becomes a literal percent), `--settings` is appended if absent, then the
+nonempty page id is appended. The argv is spawned detached as the ordinary user
+without a shell or authorization prompt. Missing desktop/action/Exec returns
+`Unavailable`. Core does not fall back to the main desktop Exec.
+
+Pure Dart clients can use `AppPreferences("remya-bar", client: settingsClient)`
+with `get(key)`, `set(key, value)`, `replace(key, value, revision)` and `watch(key)`.
+Watch subscribes before the initial Get and rereads on matching Changed events.
+Close the helper when finished; injected SettingsClient connections remain owned
+by the caller.
 
 ## Commands and matching D-Bus methods
 
@@ -37,6 +68,7 @@ No command evaluates shell input. IDs are stable catalog IDs, not translated lab
 
 | CLI | D-Bus method and input signature | Result |
 | --- | --- | --- |
+| `manage <feature>` | `Manage(s feature)` | Persist a complete current snapshot, then return the feature Get payload |
 | `get theme` | `Get(s key)` with `theme` | Versioned theme configuration |
 | `get hostname` | `Get(s key)` with `hostname` | Actual static/runtime names, saved static name, conflict and error |
 | `get system-information` | `Get(s key)` with `system-information` | Fresh read-only device/system fields with per-field errors |
@@ -61,13 +93,15 @@ No command evaluates shell input. IDs are stable catalog IDs, not translated lab
 | `get page:<id>` | `Get(s key)` with `page:<id>` | Complete page, sections, and control metadata |
 | `get <setting-id>` | `Get(s key)` | ID, availability, reason, and current value where implemented |
 | `set <setting-id> <value>` | `Set(ss id, value)` | Effective feature state after successful persistence and system readback |
+| `replace <app-id>.<key> <json> <revision>` | `Replace(sss id, value, revision)` | Compare revision and atomically save an app preference |
+| `open-app <app-id> [page]` | `OpenApp(ss app_id, page)` | Launch the app settings desktop action; empty page opens settings home |
 | `list` | `List(s cursor)` | All controls in CLI; one bounded page on D-Bus |
 | `search <query>` | `Search(s query)` | Matching page IDs, titles, and categories |
 | `open [page-id]` | `Open(s page)` | `{"opened":"<page>"}`; defaults to `home` in CLI |
 | `reload` | `Reload()` | Theme and freshly observed system state |
 | `watch [theme\|all]` | `Changed(ss topic, json)` signal plus an initial `Get("theme")` | JSON lines in CLI |
 | `restart` | `Restart()` | Request a system restart through logind with interactive authorization; save work first |
-| `close` | `Close()` | Close the GUI through its native window action; keep both resident services |
+| `close` | `Close()` | Close the GUI through its native window action; keep Core resident |
 | `quit` | `Quit()` | `{"quitting":true}` before process shutdown |
 
 `Open` also accepts `home`, `about`, `licenses`, and `repository` (the fixed project URL).
@@ -99,20 +133,20 @@ successful system change. Future available controls must add their operation to
 the common dispatcher and parity tests as part of implementing the GUI control.
 
 ```bash
-remya_settings get theme
-remya_settings set themes.material-style-variant vibrant
-remya_settings set themes.material-theme-mode dark
-remya_settings search 'material'
-remya_settings open themes
-remya_settings watch all
+remya get theme
+remya set themes.material-style-variant vibrant
+remya set themes.material-theme-mode dark
+remya search 'material'
+remya open themes
+remya watch all
 
-gdbus call --session --dest top.remya.settings.Service1 \
-  --object-path /top/remya/settings \
-  --method top.remya.settings.Settings1.Get theme
+gdbus call --session --dest top.remya.Core1 \
+  --object-path /top/remya/Core1 \
+  --method top.remya.Core1.Get theme
 
-gdbus call --session --dest top.remya.settings.Service1 \
-  --object-path /top/remya/settings \
-  --method top.remya.settings.Settings1.Set themes.material-style-variant neutral
+gdbus call --session --dest top.remya.Core1 \
+  --object-path /top/remya/Core1 \
+  --method top.remya.Core1.Set themes.material-style-variant neutral
 ```
 
 Example theme response:
@@ -139,7 +173,7 @@ The service observes atomic external config replacements at 500 ms intervals,
 using the GUI's parser and reload path. Invalid input retains the last valid
 in-memory theme and the invalid file, reports an error, and recovers after repair.
 
-D-Bus failures use these names under `top.remya.settings.Settings1`:
+D-Bus failures use these names under `top.remya.Core1`:
 
 | Suffix | Meaning |
 | --- | --- |
@@ -161,59 +195,32 @@ writer against the same TOML file; native application registration enforces one
 settings instance per session. Read-only operations do not write system settings;
 `Set` is the explicit write boundary.
 
-## Client package and compatibility
+## Client package
 
-`packages/remya_settings_client/` is the public source dependency. Its pure Dart
-entrypoint, `settings_contract.dart`, contains D-Bus transport and versioned
-configuration contracts and can compile without a Flutter engine. The Flutter
-entrypoint adds the common MD3E theme and observable theme controller. It contains
-no Settings pages, catalog renderer, native system writes, or backend FFI.
-
-Release bar clients use D-Bus signals and keep the last valid theme through
-service failures; a two-second refresh recovers after service restart. Debug
-clients may use a read-only repository config override. Both applications use
-the same seed, palette mapping, typography fallback, and expressive icon style.
-The seed comes from `Get("accent")` and the `accent` topic. The `theme` value and
-`config.toml` schema stay unchanged, so clients built before the accent setting keep
-working and simply stay on the default seed until rebuilt.
-
-The current local path dependency expects sibling repositories while developing.
-Installed bundles do not depend on either source tree. Before independently
-releasing the client package, pin a version/tag and check compatibility; do not
-make bar components read private files or call private methods as a shortcut.
-Keep new operations in their owning settings feature and expose them through the
-same dispatcher. Preserve stable IDs and interface `Settings1` for compatible
-additions; use a new interface version for incompatible wire/schema changes.
+`packages/remya_client` is the pure Dart source dependency. Import
+`remya_client.dart` or `settings_contract.dart` for `SettingsClient` and feature
+extensions. `SettingsClient.manage(feature)` calls Manage; `call` exposes every
+Core1 operation. Shared Flutter theme and identity adapters live in `packages/remya_ui`; Settings pages remain in the GUI repository.
+The shared theme TOML still contains version and `[theme]` only; accent and custom
+AI endpoints have independent shared files.
 
 ## Verification
 
-- `fvm flutter test`: configuration persistence, validation, conflicts and
-  resolutions, failure retention, service controllers, and important GUI interactions.
-  Shallow presentation checks and static XML string assertions were removed;
-  CLI/D-Bus contract parity is exercised by the live interface smoke test.
-- `python test/interface_smoke.py`: installs both release bundles into temporary
-  XDG roots, starts an isolated session bus, and exercises actual CLI/D-Bus
-  activation, Rust writes and readback, signals, malformed configuration recovery,
-  three-output bar theme propagation where available, navigation, and shutdown.
-  Requires both release bundles, Hyprland, `grim`, Pillow, `gdbus`, and desktop-file-utils.
-- The smoke test uses a keyfile GSettings backend and a temporary HOME/config root;
-  it does not change personal appearance configuration.
-
-The smoke test samples Bar colors to verify theme propagation without retaining
-page screenshots or checking decorative geometry. Pointer clicks are checked
-manually; automated interface tests do not move the user's pointer. A timed-out
-write may still finish at the service; read the effective value before retrying.
+Run `cargo fmt --all`, `cargo clippy --workspace --all-targets -- -D warnings`,
+`cargo test --workspace` and `(cd packages/remya_client && fvm dart analyze)`.
+`tests/xdg_install_test.py` checks staged Core installs, command ownership,
+activation/unit registration and preservation of independent Settings files.
+Other smoke tests use standalone `target/{debug,release}/remyad` and
+`target/release/remya`, with private XDG roots and buses. Tests requiring a
+compositor, system services or image decoding need those runtime facilities.
+A timed-out write may still finish at the service; read effective state before retrying.
 
 ## Opening Settings during development
 
-A debug Bar passes the sibling Settings debug executable to the public
-`openRemyaSettings` helper. This uses normal native application activation and
-starts the debug GUI/service without installing desktop or D-Bus activation files.
-Pass `page: 'power'` to open Power & battery directly in either build mode.
-Build Settings with `fvm flutter build linux --debug` once before using this path;
-a missing build reports that command. A release caller keeps using D-Bus `Open`.
-The debug Settings process obtains its config root from its own native runner,
-independently of the Bar working directory.
+Build and run the Settings GUI independently. Core's Open resolves its desktop
+entry or PATH command. `openRemyaSettings(debugExecutable: ..., page: ...)` can
+launch an explicitly selected debug GUI with `--gui <page>`, matching Core Open.
+Release clients call Core's Open.
 
 ## Date and time
 
@@ -226,13 +233,13 @@ System writes request interactive polkit authorization; missing services, cancel
 authorization, and mismatching readback are errors, never simulated success.
 
 ```sh
-remya_settings get date-time
-remya_settings get timezones
-remya_settings set date-time.fb2a23dc Asia/Taipei
-remya_settings set date-time.6422d209 '{"local_time":"2026-10-30T14:30:00","timezone":"Asia/Taipei"}'
-remya_settings get configuration
-remya_settings resolve appearance system
-remya_settings resolve date-time settings
+remya get date-time
+remya get timezones
+remya set date-time.fb2a23dc Asia/Taipei
+remya set date-time.6422d209 '{"local_time":"2026-10-30T14:30:00","timezone":"Asia/Taipei"}'
+remya get configuration
+remya resolve appearance system
+remya resolve date-time settings
 ```
 
 Manual time accepts exactly `YYYY-MM-DDTHH:MM:SS` interpreted in the supplied
@@ -261,7 +268,7 @@ server configuration.
 Time servers default to **Default**; normally no change is needed. Custom servers
 are stored in `/etc/systemd/timesyncd.conf.d/90-remya-settings.conf` under `[Time]`
 with an empty `NTP=` reset followed by `NTP=<servers>`. The bundled Rust helper
-`libexec/remya-settings-service --privileged` is authorized once through pkexec and accepts only validated
+`remyad --privileged` is authorized once through pkexec and accepts only validated
 server names/IP addresses, atomically replaces this one fixed file, restarts
 `systemd-timesyncd.service`, and checks effective `SystemNTPServers`. A failed
 restart or effective readback restores the previous file and restarts the service
@@ -274,10 +281,10 @@ participate according to systemd policy. Server changes require automatic time t
 be enabled and do not require a system reboot.
 
 ```sh
-remya_settings set date-time.db451de3 true
-remya_settings set date-time.098d06ec sync
-remya_settings set date-time.7e33a213 '["pool.ntp.org"]'
-remya_settings set date-time.7e33a213 '[]'
+remya set date-time.db451de3 true
+remya set date-time.098d06ec sync
+remya set date-time.7e33a213 '["pool.ntp.org"]'
+remya set date-time.7e33a213 '[]'
 ```
 
 Date/time results include `timezone`, `local_time`, `ntp`, `ntp_synchronized`,
@@ -315,7 +322,7 @@ the display language is sent as `LANG`'s value, which localed drops). Other loca
 variables such as `LC_CTYPE` or `LANGUAGE` are kept. Readback must match, then
 `language.toml` is saved and `Changed("language", state)` is emitted. Programs
 started after the next sign-in use the new values; the GUI says so while this
-session's environment differs. First use saves the system values without writing;
+session's environment differs. Unmanaged reads follow the system values without saving;
 writes are refused during a conflict; `Resolve language system|settings` adopts the
 system values or writes the saved ones with readback. `LC_ALL` or per-user locale
 files can still override these for some programs.
@@ -326,12 +333,12 @@ Keyboard layouts are `input` options (see
 `{layouts: [{id, label, variants: [{id, label}]}]}` from `evdev.lst`.
 
 ```sh
-remya_settings get locales
-remya_settings set language.display '"de_DE.UTF-8"'
-remya_settings set language.format '""'
-remya_settings get format-preview:de_DE.UTF-8
-remya_settings set language.keyboard-layouts '[{"layout":"us","variant":""},{"layout":"de","variant":"nodeadkeys"}]'
-remya_settings set language.keyboard-options '"grp:win_space_toggle"'
+remya get locales
+remya set language.display '"de_DE.UTF-8"'
+remya set language.format '""'
+remya get format-preview:de_DE.UTF-8
+remya set language.keyboard-layouts '[{"layout":"us","variant":""},{"layout":"de","variant":"nodeadkeys"}]'
+remya set language.keyboard-options '"grp:win_space_toggle"'
 ```
 
 ## Display
@@ -358,12 +365,12 @@ configuration (`hyprctl status` reports `configProvider: lua`; `hl.monitor` is
 verified on Hyprland 0.57). Set values are JSON:
 
 ```sh
-remya_settings get display
-remya_settings set display.12e2ed4d '{"output":"DP-1","value":"1.5","confirm_seconds":15}'
-remya_settings resolve display keep
-remya_settings set display.position '{"output":"DP-1","value":"1920x0"}'
-remya_settings set display.5d419889 '{"output":"eDP-1","value":"40"}'
-remya_settings set display.15697afc detect
+remya get display
+remya set display.12e2ed4d '{"output":"DP-1","value":"1.5","confirm_seconds":15}'
+remya resolve display keep
+remya set display.position '{"output":"DP-1","value":"1920x0"}'
+remya set display.5d419889 '{"output":"eDP-1","value":"40"}'
+remya set display.15697afc detect
 ```
 
 | Setting ID | `value` | Rule field |
@@ -432,75 +439,39 @@ through a separate process, which needs the `i2c-dev` module and I2C access. Oth
 outputs report a `reason`. Brightness is read when the page opens, not while polling,
 because DDC/CI is slow.
 
-`cargo test -p remya_settings_display` covers parsing, validation, reconciliation,
+`cargo test -p remya_display` covers parsing, validation, reconciliation,
 confirmation, and failures against a fake compositor. `test/display_test.dart` covers
-the controller and page. `python test/display_smoke.py` runs the real service against
+the controller and page. `python tests/display_smoke.py` runs the real service against
 a nested Hyprland with headless outputs, a private bus, and isolated XDG roots.
 
 ## Initialization, conflicts, and scheduling
 
-Every implemented system preference adopts validated actual system state on its
-first successful load and saves it atomically. Later checks preserve saved and
-actual values separately. A conflict displays a warning at the top of the window;
-`Resolve(feature, "system")` saves fresh actual state, while
-`Resolve(feature, "settings")` applies the saved value through the same backend as
-the GUI. Detection failures leave initialization incomplete and visible. App-only
-palette preferences and disabled previews do not participate.
+A feature is managed exactly when its saved configuration file exists. Unmanaged
+refreshes read the live system and keep the in-memory snapshot equal to it, without
+writing a snapshot or reporting conflicts. `Manage(feature)` reads and atomically
+saves the snapshot; successful Set or Resolve also starts management. Failed
+reads, authorization and persistence remain visible. Managed refreshes retain
+saved/system differences until explicitly resolved. Deleting a saved file returns
+the feature to observation on its next refresh. Shared `theme.toml` may initialize
+on first read because it is a Remya preference.
 
-`SettingsScheduler` runs independent feature checks concurrently at startup, on
-page navigation, and every 30 seconds. Overlapping rounds share one future;
-the resident service serializes its own reads/writes, so polling cannot race a
-write. Failures are retained by each controller and cannot cancel other feature
-checks. Toolkit and command capabilities are cached until application restart.
-Time zone offsets are refreshed on feature reload; locale options are cached after discovery; the open date/time page
-updates its clock locally once per second and does not perform per-second IPC.
-
-`test/date_time_test.dart`, `test/service_controllers_test.dart`, and
-`test/app_preferences_test.dart` cover the
-shared controllers, both conflict resolutions, failures, and GUI behavior.
-`python test/interface_smoke.py` verifies actual CLI/D-Bus parity.
-`cargo test -p remya_settings_date_time` exercises actual GIO D-Bus calls against a
-private bus/fake timedated, including permission denial, NTP restoration, readback,
-and calendar/DST validation; it never changes the host clock.
-
-Authorization requires the `polkit-kde-agent` runtime dependency on Arch. On the first explicit GUI launch Settings starts its installed user agent service and authorizes the privileged process once; no compositor
-configuration is changed. Background reconciliation does not disable or recreate
-editing controls. Errors appear in rounded Material error surfaces at the bottom.
+Manage accepts `appearance`, `date-time`, `display`, `night-light`, `input`,
+`desktop`, `themes`, `text-size`, `language`, `hostname`, `default-apps`, `startup`,
+`network`, `background`, `power`, `cameras`, `cleanup`, `appimages`, and `updates`.
+Unknown features return InvalidArgument. `appearance` uses the appearance Get
+payload. `updates` only opts into saving the schedule; update execution remains paused.
+Live brightness/gamma, radio state, Bluetooth, sound, proxy, printers, account
+observations and inventory operations retain their existing live-state exclusions.
 
 ## Resident process architecture
 
-`top.remya.settings.Service1`, `/top/remya/settings`, `Settings1`, the existing
-method signatures, JSON keys, and `Changed(ss)` remain the public contract.
-The compatible `Close()` / `close` addition closes the GUI without quitting Settings.
-The native service reads `packages/remya_settings_client/api/settings1.xml`;
-`python test/interface_smoke.py` exercises its methods through the CLI and D-Bus.
-
-The launcher dispatches commands to the existing CLI and `--service` to the Rust
-user service. `Open` starts `remya_settings --gui <page>` only when needed; further
-opens present the existing GUI and publish a navigation invalidation. Closing the
-window terminates the GUI and releases its engines. Configurations, last valid
-state, conflict tracking, and the public bus remain in the user service. Quit
-terminates the GUI and closes the privileged connection. The service reaps closed
-GUI children and performs independent reconciliation every 30 seconds; UI timers
-run only while the GUI exists. No Flutter engine is loaded by either daemon.
-
-The first explicit Open requests one administrator authorization. Read-only
-D-Bus activation by Bar does not. The privileged Rust process communicates solely
-through inherited stdin/stdout pipes with 8 KiB frames and a typed, finite command
-whitelist; there is no network listener or public privileged socket. It reads the
-system bus and writes only the explicitly selected system setting. User theme
-files and XDG configuration stay owned and written by the ordinary-user service.
-EOF terminates the privileged process. Failed or canceled authorization remains
-visible; closing and reopening the GUI permits another explicit attempt. A dead
-helper is not silently restarted in response to a write.
-
-GUI adapters in `service_controllers.dart` perform no persistence or direct
-system writes. Existing feature controllers remain widget/test models; their old
-Dart D-Bus dispatcher has been replaced by the resident service. LC_TIME readback
-compares normalized locale spellings and recognizes localed removing a redundant
-LC_TIME that equals LANG. The GUI adopts this actual default instead of claiming
-a readback mismatch. Bottom status cards share MD3E container styling; technical
-errors are available in Details and restart notices use a primary action.
+The daemon reads `packages/remya_client/api/core1.xml`, serializes operations and
+refreshes features at startup and every 30 seconds. The GUI stays in its own repo.
+The first explicit Open requests administrator authorization; ordinary read-only
+D-Bus activation does not. The privileged Rust helper uses inherited stdin/stdout,
+a finite typed command whitelist and 64 KiB frames. EOF terminates it. Failed or
+canceled authorization remains visible; closing and reopening permits another
+explicit attempt. A dead helper is never silently restarted by a write.
 
 ## System information
 
@@ -560,7 +531,7 @@ static names can be adopted and restored; the normal rename form accepts only a
 single nonempty label. Runtime names are observations, never persisted.
 
 The Rust service initializes `hostname.toml` from actual hostnamed readback on
-first successful detection, never from defaults. Startup, page entry, polling,
+an explicit Manage or successful Set/Resolve, using detected values rather than defaults. Startup, page entry, polling,
 and explicit Refresh compare current static configuration with the saved name.
 Invalid configuration, detection failures, failed authorization, writes, or
 persistence preserve the last valid saved value and surface an error. Conflicts
@@ -630,7 +601,7 @@ and disabled when an image is selected. Choosing an image also stops other mpvpa
 processes, because they would cover it. An mpvpaper started by another program is
 read as the actual video background and reported in `warnings`.
 
-First use records the actual configuration and applies nothing. Startup, page entry,
+Unmanaged reads track the actual configuration without saving or applying it. Startup, page entry,
 polling and output events compare saved values with fresh readback: type, images,
 splash, and video while video is active. A remembered video is not a difference
 while an image shows. Conflicts keep both values and block writes until `Resolve
@@ -840,9 +811,9 @@ For an unadvertised network, pass `ssid` and `hidden_security` (`open`, `wpa2` o
 An existing saved SSID reuses its profile and must match the requested security.
 
 Use `-` as the CLI value to read it from stdin, so a password does not appear in the process list:
-`printf '%s' '{"ssid":"Cafe","password":"..."}' | remya_settings set wifi.connect -`
+`printf '%s' '{"ssid":"Cafe","password":"..."}' | remya set wifi.connect -`
 
-Every other `network-status.*`, `wifi.*`, `known-networks.*`, `ethernet.*`, `vpn.*` and `hotspot.*` control is read-only. Profiles in `get network` carry `kind` (`wifi`, `hotspot`, `ethernet`, `vpn`, `wireguard`), `interface`, `vpn_type`, `priority`, `mac`, `ip`, `hotspot`, `active` and `activating`; the state also has `connectivity_check_available`, `connectivity_check_enabled`, `wifi_backend`, `dns_mode` and `config_invalid`, and devices have `ap` and `bands`. `resolve network system` also replaces an invalid saved file. `Get("configuration")` includes `network`. `Changed("network", state)` reports NetworkManager changes, excluding signal strength between scans; `Changed(<proxy id>, state)` follows proxy writes. `NetworkClient` in `packages/remya_settings_client` exposes these without Flutter.
+Every other `network-status.*`, `wifi.*`, `known-networks.*`, `ethernet.*`, `vpn.*` and `hotspot.*` control is read-only. Profiles in `get network` carry `kind` (`wifi`, `hotspot`, `ethernet`, `vpn`, `wireguard`), `interface`, `vpn_type`, `priority`, `mac`, `ip`, `hotspot`, `active` and `activating`; the state also has `connectivity_check_available`, `connectivity_check_enabled`, `wifi_backend`, `dns_mode` and `config_invalid`, and devices have `ap` and `bands`. `resolve network system` also replaces an invalid saved file. `Get("configuration")` includes `network`. `Changed("network", state)` reports NetworkManager changes, excluding signal strength between scans; `Changed(<proxy id>, state)` follows proxy writes. `NetworkClient` in `packages/remya_client` exposes these without Flutter.
 
 ## Night light
 
@@ -853,13 +824,13 @@ restarts. hyprsunset cannot reload, so every configuration change replaces the
 process; gamma and a manual override on a schedule are carried across.
 
 ```text
-remya_settings get night-light
-remya_settings set night-light.e32be03e true
-remya_settings set night-light.temperature 2600
-remya_settings set night-light.7e6239c9 true
-remya_settings set night-light.e8868af6 19:00
-remya_settings set night-light.a0bb9f49 06:30
-remya_settings resolve night-light system
+remya get night-light
+remya set night-light.e32be03e true
+remya set night-light.temperature 2600
+remya set night-light.7e6239c9 true
+remya set night-light.e8868af6 19:00
+remya set night-light.a0bb9f49 06:30
+remya resolve night-light system
 ```
 
 | Setting | Values | Effect |
@@ -925,9 +896,9 @@ are intentionally visible to clients until their prompt ends. Use stdin to keep
 input PINs out of the process list:
 
 ```bash
-remya_settings get bluetooth
-remya_settings set bluetooth.scan '{"adapter":"/org/bluez/hci0","enabled":true}'
-remya_settings set bluetooth.respond -
+remya get bluetooth
+remya set bluetooth.scan '{"adapter":"/org/bluez/hci0","enabled":true}'
+remya set bluetooth.respond -
 ```
 
 No API method signature or existing payload changes. There is no Bluetooth
@@ -962,7 +933,7 @@ Devices have stable `name`, current `index`, `description`, `direction` (`output
 `has_volume`, `volume_writable` and `preferences`. Preferences contain raw
 PulseAudio channel volumes (`65536` is 100%) and `muted`.
 
-All writes are bounded to 4096 bytes and use the existing `Set(id, json)` / `remya_settings set id '<json>'`
+All writes are bounded to 4096 bytes and use the existing `Set(id, json)` / `remya set id '<json>'`
 contract. `SoundClient.changeSound` encodes a Dart map; `setSound` accepts JSON.
 
 | Setting IDs | JSON input |
@@ -1026,6 +997,10 @@ or applies saved values for that camera. `Get("configuration")` includes cameras
 CLI get/set/resolve use the identical service operations. CameraClient exposes
 readCameras, changeCamera and resolveCamera without Flutter. `open cameras`
 opens the page; local frame rendering is a GUI concern and not a D-Bus payload.
+The optional `remya_camera/preview` Cargo feature exposes the plain Rust
+`preview::{start_preview, next_preview_frame, stop_preview}` API. It is disabled
+by default and has no Flutter or FRB dependency. Settings owns the in-process
+FRB wrapper; frames never pass through Core1.
 See [Camera](camera.md) for dependencies, persistence and verification.
 
 ## Power
@@ -1043,171 +1018,11 @@ when hypridle is unavailable. CLI get/set use the same operations. Use
 `Set("power.743773bd", "open")` for Energy saver or
 `Set("power.03bd05ee", "open")` for Battery usage.
 
-## Remy'a Bar appearance
+## Live display controls
 
-Use `get remya-bar.clock-seconds` and `set remya-bar.clock-seconds <true|false>`
-or the corresponding `Get(id)` and `Set(id, value)` D-Bus methods. Both
-return `{"id":"remya-bar.clock-seconds","availability":"available","value":true}`
-with the effective boolean. After a successful write, `Changed` uses the setting
-ID as its topic and carries the same payload. The pure Dart `BarClockClient`
-extension provides typed read and write methods.
-
-The ordinary-user service stores `clock_seconds` as a boolean in
-`remya-bar.toml`. A missing file defaults to `true`. Malformed files are
-reported and protected from overwrites. This preference controls the clock
-capsule across outputs and has no system counterpart.
-
-## Launcher Clipboard
-
-`Get("clipboard")` (CLI `get clipboard`) returns a setting whose `value`
-contains `enabled`, `maxItems` and `retentionDays`. Remya Launcher owns
-and applies the policy immediately. Settings connects to the Launcher service
-over its private user socket and returns `Unavailable` if it cannot connect.
-
-| ID | Value accepted by `Set(id, value)` |
-| --- | --- |
-| `clipboard.history-enabled` | `true` or `false`. Pausing capture keeps saved items. |
-| `clipboard.max-items` | Whole items, 1 to 5000. Default 500. |
-| `clipboard.retention-days` | Whole days, 1 to 365. Default 30. |
-| `clipboard.clear-history` | `true` to confirm clearing all Launcher history, including pinned entries. |
-
-Each ID is available to `Get(id)` and the CLI `get` and `set` commands.
-Successful writes emit `Changed` with the written ID. Reads and writes of
-individual settings return the effective scalar in `value`. For
-`clipboard.clear-history`, `value` is `null`. Reducing either history limit
-immediately prunes affected unpinned entries. The pure Dart `ClipboardClient`
-extension provides typed access.
-
-## Notifications
-
-These preferences belong to the desktop notification service (Remy'a Bar) and
-have no system counterpart. `Get("notifications")` (CLI `get notifications`)
-returns every preference in `value`:
-
-```json
-{"do_not_disturb":false,"popup_duration":5,"sounds":true,
- "schedule":false,"schedule_start":"22:00","schedule_end":"07:00","schedule_repeat":"every-day",
- "fullscreen":false,"priority_calls":true,"priority_apps":[]}
-```
-
-Each ID below is read with `Get(id)` and written with `Set(id, value)`; both
-return `{"id":<id>,"availability":"available","value":<value>}`, and a write
-emits `Changed` with the ID as topic.
-
-| ID | Value |
-| --- | --- |
-| `notifications.do-not-disturb` | `true` or `false` |
-| `notifications.popup-duration` | whole seconds, 1 to 60 |
-| `notifications.sounds` | `true` or `false` |
-| `quiet-schedule.enabled` | `true` or `false` |
-| `quiet-schedule.start`, `quiet-schedule.end` | 24-hour `HH:MM` |
-| `quiet-schedule.repeat` | `every-day`, `weekdays` or `weekends` (the day a period starts) |
-| `quiet-schedule.fullscreen` | `true` or `false` |
-| `priority-notifications.calls` | `true` or `false` |
-| `priority-notifications.apps` | JSON `{"id":"org.telegram.desktop","name":"Telegram","priority":true}` adds or replaces an app; `priority: false` removes it. `Get` returns the list of `{id,name}` |
-
-`notifications.automatic-dnd` and `notifications.priority` are page links:
-`Set(id, "open")` opens Automatic Do Not Disturb or Priority notification.
-Invalid values return `InvalidArgument`. The service stores everything in
-`notifications.toml` beside its configuration; a missing file means the
-defaults above, and a malformed file is reported and protected from
-overwrites. The pure Dart `NotificationsClient` extension and
-`NotificationPreferences` provide typed access.
-
-Do Not Disturb is in effect when switched on manually, during a scheduled
-period (a period that ends earlier than it starts runs past midnight and
-belongs to the day it starts), or, with `fullscreen`, while any display shows
-a full screen window. It hides popups and sounds except for Critical
-notifications, call notifications (`call` or `call.incoming` category) when
-`priority_calls` is on, and apps in `priority_apps`, matched by desktop entry
-ID or app name, ignoring case. History still collects everything.
-
-### Remya Bar folded applications
-
-`Get("remya-bar.folded-apps")` returns an available setting whose `value` is
-the list of folded StatusNotifierItem IDs. The list defaults to empty.
-`Set("remya-bar.folded-apps", "{\"id\":\"app-id\",\"folded\":true}")` adds one
-ID, and `folded: false` removes it. The operation returns the updated setting
-and emits `Changed` with the same topic. The CLI accepts the same JSON string
-as its set value. Settings serializes edits and atomically stores the list in
-`remya-bar-tray.toml` beside its selected configuration.
-
-
-## Remy'a Bar pill layout
-
-`Get("remya-bar.layout")` returns the main bar pill layout in `value`. With no
-saved layout, the Workspaces and Clock group is centered and Resources shows
-CPU, memory, and network:
-
-```json
-{"groups":[["notifications","window","resources"],["workspaces","clock"],["tray"],["ai-usage","battery","sidebar"]],
- "workspace_count":8,"resources":["cpu","memory","network"],"window_app_name":false,"media_marquee":false,"center":1}
-```
-
-`groups` is the ordered list of pill groups; the bar spaces groups evenly and
-places pills 8 pixels apart inside a group. Pill IDs are `notifications`, `window`, `resources`,
-`media`, `workspaces`, `clock`, `tray`, `ai-usage`, `battery` and `sidebar`. A pill absent
-from every group is hidden. Groups must be non-empty, IDs unique, and `sidebar`
-must stay visible because it is the bar's route to quick settings.
-`workspace_count` (1 to 10) sets the workspace slots per group of numbered
-workspaces. `resources` is a non-empty unique subset of `cpu`, `memory`, `gpu`
-and `network`. `window_app_name` shows the app ID above the window title.
-`media_marquee` is a boolean that enables continuous scrolling for long media
-titles. It defaults to false, including saved layouts that omit the field.
-It has an effect only while the media pill is visible.
-Optional `center` is the index of one group centered on the bar; groups before
-and after it are spaced evenly within their own side. It is omitted when no
-group is centered and must refer to an existing group.
-Clock seconds remain `remya-bar.clock-seconds`.
-
-`Set("remya-bar.layout", JSON)` replaces the whole object. Invalid input returns
-`InvalidArgument`. The response and `Changed("remya-bar.layout", state)` carry
-the committed layout. Missing configuration returns the defaults without writing
-`remya-bar-layout.toml`; malformed files are reported and protected from
-overwrites. The CLI `get`/`set` commands use the same operation, and the pure
-Dart `BarLayoutClient` extension provides typed access through `BarLayout`.
-
-## Remya Bar sidebar layout
-
-`Get("remya-bar.sidebar-layout")` returns the ordered visible tile IDs in
-`value`. Missing configuration returns the defaults without writing a file.
-`Set("remya-bar.sidebar-layout", JSON)` takes `{"expected":[...],"tiles":[...]}`.
-Both arrays use tile IDs. The service rejects unknown and duplicate IDs and
-rejects concurrent edits when `expected` differs from the saved order. The
-response and `Changed("remya-bar.sidebar-layout", state)` contain the committed
-layout. The same commands are available through the Settings CLI. Saved layouts
-omit retired `game`, `lock` and `audio-switcher` tiles on read. The retired
-`vpn` slot becomes `dnd-quick` (the compact Do Not Disturb tile) on read.
-Layouts that hid VPN can add the compact tile from the editor. The `caffeine`
-tile ID is shown as Keep awake.
-
-## Remya Bar keyboard preview
-
-`Get("remya-bar.keyboard-preview")` returns a boolean in `value`, defaulting
-to `true`. `Set("remya-bar.keyboard-preview", "true" | "false")` controls
-touch key previews and emits `Changed` with the same ID. Both operations
-also work through the CLI and the public `SidebarClient` extension.
-
-## Remya Bar on-screen display
-
-`Get("remya-bar.osd")` returns all four OSD preferences in `value`:
-`{"volume_step":5,"volume_max":150,"brightness_step":5,"gamma_min":10}`. Each
-individual setting (`remya-bar.volume-step`, `remya-bar.volume-max`,
-`remya-bar.brightness-step`, `remya-bar.gamma-min`) is also readable with
-`Get(id)` and writable with `Set(id, value)` (whole percentages: `1` to `25`
-for steps, `100` to `150` for `volume-max`, `10` to `90` for `gamma-min`),
-returning
-the effective integer in `value` and emitting `Changed` with the written ID.
-Missing configuration uses defaults without writing `remya-bar-osd.toml`;
-malformed files are reported and protected from overwrites. The pure Dart
-`BarOsdClient` extension provides typed access through `BarOsdPreferences`.
-
-`Changed("display-brightness", {"outputs":[…]})` also reports kernel backlight
-changes made outside Settings. Each included output has the same fields as
-`Get("display-brightness:<output>")`; the signal lists only outputs backed by
-kernel backlight devices. External DDC/CI brightness is read on demand. A
-single-output Settings write still returns and publishes its verified output and
-percentage without repeating backend discovery.
+`Get`/`Set display-gamma` controls live hyprsunset gamma (10–100).
+`Get`/`Set display-brightness:<output>` controls hardware brightness for an active
+output. These are live observations and writes, excluded from saved conflicts.
 
 ## Startup apps
 
@@ -1429,12 +1244,12 @@ wraps the saved value. `Set text-size.scale <number>` writes GNOME's
 `org.gnome.desktop.interface text-scaling-factor` (0.5 to 3.0, `InvalidArgument`
 otherwise), verifies it with a fresh `gsettings get`, saves `text-size.toml` and
 emits `Changed("text-size", state)`. Writes are refused while a conflict is open;
-`Resolve text-size system|settings` reconciles. First use saves the system value
+`Resolve text-size system|settings` reconciles. Unmanaged reads track the system value without saving
 without writing. GTK 3, GTK 4 and Flutter apps follow the key; Qt, KDE and other
 toolkits are not changed.
 
 ```sh
-remya_settings set text-size.scale 1.25
+remya set text-size.scale 1.25
 ```
 
 ## Storage
@@ -1482,8 +1297,8 @@ Missing services return errors; they never imply that radios are off.
 and all BlueZ adapters; `Set airplane.wifi true|false` changes only Wi-Fi.
 Both return the verified aggregate state. `Changed` uses the written setting ID.
 
-CLI examples: `remya_settings get airplane`,
-`remya_settings set airplane.enabled true`, `remya_settings set airplane.wifi true`.
+CLI examples: `remya get airplane`,
+`remya set airplane.enabled true`, `remya set airplane.wifi true`.
 Pure Dart callers use `readAirplane`, `setAirplaneEnabled` and
 `setAirplaneWifiEnabled` from the client network extension. No preference is
 persisted or restored at startup; Off enables all radios rather than restoring
@@ -1493,11 +1308,11 @@ See [network behavior and verification](network.md#airplane-mode).
 ## AI providers
 
 The optional `codexbar-cli` package supplies CodexBar provider usage, switches
-and credentials; models.dev describes providers and models. Settings keeps Bar
-quota preferences and custom OpenAI-compatible endpoints in `remya-ai.toml`
+and credentials; models.dev describes providers and models. Core keeps
+custom OpenAI-compatible endpoints in `shared/ai.toml`
 and custom API keys in the Secret Service (see [XDG layout](xdg-layout.md)).
 CLI `get`/`set` and D-Bus `Get`/`Set` share one dispatcher. Pure Dart callers
-use `readAi`, `readAiProvider`, `setAiProvider`, `setAiBar`, `setAiCredential`,
+use `readAi`, `readAiProvider`, `setAiProvider`, `setAiCredential`,
 `addAiCustomProvider` and `removeAiCustomProvider` from `src/ai.dart`.
 
 ### Get `ai.providers`
@@ -1517,15 +1332,13 @@ use `readAi`, `readAiProvider`, `setAiProvider`, `setAiBar`, `setAiCredential`,
     {"id":"openrouter","name":"OpenRouter","kind":"codexbar",
      "credential":{"apiKey":true,"cookie":false},"sourceModes":["api","auto"]},
     {"id":"models.dev:groq","name":"Groq","kind":"models-dev",
-     "baseUrl":"https://api.groq.com/openai/v1","modelsDev":"groq"}],
-  "bar":{"pinned":["claude","codex"],"lowPercent":20,"showUsed":false,"ringOrder":"5h-outer"}}}
+     "baseUrl":"https://api.groq.com/openai/v1","modelsDev":"groq"}]}}
 ```
 
 - `updatedAt` is the UTC time of the usage probe
   `codexbar usage --provider all --format json`. The probe is cached in memory
   for 5 minutes and dropped by every successful `ai.providers`,
-  `ai.credential` and `ai.custom` Set. `ai.bar` changes no CodexBar state and
-  keeps the cache.
+  `ai.credential` and `ai.custom` Set.
 - `status` is `ready` when the probe returned usage. A provider with a
   credential in `codexbar config dump` (API key, cookie header or token
   accounts) is visible as `error` (with the probe's `error` message) when the
@@ -1549,11 +1362,6 @@ use `readAi`, `readAiProvider`, `setAiProvider`, `setAiBar`, `setAiCredential`,
   depth. Secrets never appear in replies.
 - Without the `codexbar` executable, `codexbar.available` is false,
   `providers` holds only custom endpoints and `catalog` only models.dev rows.
-
-### Get `ai.bar`
-
-Returns `{"id":"ai.bar","value":{"pinned":[...],"lowPercent":20,"showUsed":false,"ringOrder":"5h-outer"}}` from
-`remya-ai.toml` without running CodexBar. Defaults are no pins, 20 %, `showUsed: false` (remaining quota) and `ringOrder: "5h-outer"`.
 
 ### Get `ai.provider/<id>`
 
@@ -1580,12 +1388,6 @@ Each successful Set returns the fresh `ai.providers` Get reply and emits
   override). While CodexBar has no configuration file, the first write
   validates and creates it without clobbering, with every other provider
   enabled. `enabled` and `source` are verified by readback.
-- `ai.bar` `{"pinned"?:[ids],"lowPercent"?:int,"showUsed"?:bool,"ringOrder"?:"5h-outer"|"5h-inner"}`
-  accepts at most 3 unique ids that are currently visible providers, a percent
-  in 1..=100, whether the bar shows used (`true`) or remaining (`false`) quota,
-  and whether the 5h window sits on the outer (`"5h-outer"`) or inner
-  (`"5h-inner"`) ring (`1w` on the other ring). The file is written atomically;
-  an invalid existing file is refused, not replaced.
 - `ai.credential` `{"id":...,"apiKey"?:str,"cookie"?:str,"clear"?:true}` takes
   exactly one action. Secrets must be non-empty, at most 16 KiB and free of
   control characters. CodexBar providers use
@@ -1599,8 +1401,7 @@ Each successful Set returns the fresh `ai.providers` Get reply and emits
   name (ASCII letters and digits, other runs become `-`) and must be unique.
   `baseUrl` must be `https`, or `http` only on `localhost` or a loopback IP,
   without user information. `modelsDev` is an optional models.dev provider id.
-  Remove also clears the stored API key and unpins the id.
+  Remove also clears the stored API key.
 
-CLI examples: `remya_settings get ai.providers`,
-`remya_settings get ai.provider/claude`,
-`remya_settings set ai.bar '{"pinned":["claude"],"lowPercent":15}'`.
+CLI examples: `remya get ai.providers`,
+`remya get ai.provider/claude`.

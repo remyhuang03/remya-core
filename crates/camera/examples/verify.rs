@@ -1,5 +1,5 @@
 //! Explicit hardware verification: restore every adjusted value before exiting.
-use remya_settings_camera::{Backend, native::Native};
+use remya_camera::{Backend, native::Native};
 use std::collections::BTreeMap;
 fn main() {
     let cameras = Native.read().unwrap();

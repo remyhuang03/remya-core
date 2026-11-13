@@ -1,7 +1,7 @@
 //! External tools behind the background feature. Everything here is a separate
 //! process; mpvpaper and ffmpeg are runtime tools, never linked into Settings.
 use crate::video::UNIT;
-use remya_settings_display::{Hyprctl, run_bytes};
+use remya_display::{Hyprctl, run_bytes};
 use serde_json::Value;
 use std::{collections::BTreeMap, path::Path, thread, time::Duration};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, Signal, System, UpdateKind};

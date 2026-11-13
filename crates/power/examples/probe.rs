@@ -1,12 +1,12 @@
 //! Live probe using isolated preferences/history; exercise mode restores host values.
-use remya_settings_power::Power;
+use remya_power::Power;
 fn main() {
     let root = std::path::PathBuf::from(std::env::args().nth(1).expect("isolated root"));
     let idle = std::path::PathBuf::from(std::env::args().nth(2).expect("hypridle.conf"));
     if std::env::args().nth(3).as_deref() == Some("idle-exercise") {
         let original = std::fs::read_to_string(&idle).unwrap();
-        let values = remya_settings_power::idle::read(&original).unwrap();
-        let wanted = remya_settings_power::idle::Timeouts {
+        let values = remya_power::idle::read(&original).unwrap();
+        let wanted = remya_power::idle::Timeouts {
             screen: values.screen + 1,
             sleep: values.sleep + 1,
             lock: if values.lock == 0 {
@@ -16,9 +16,9 @@ fn main() {
             },
             lock_before_sleep: !values.lock_before_sleep,
         };
-        let result = remya_settings_power::idle::apply(&idle, &wanted);
-        let restore = remya_settings_power::idle::apply(&idle, &values);
-        remya_settings_display::atomic_write(&idle, original.as_bytes()).unwrap();
+        let result = remya_power::idle::apply(&idle, &wanted);
+        let restore = remya_power::idle::apply(&idle, &values);
+        remya_display::atomic_write(&idle, original.as_bytes()).unwrap();
         assert!(restore.is_ok(), "restore failed: {restore:?}");
         assert!(result.is_ok(), "timeout exercise failed: {result:?}");
         assert_eq!(std::fs::read_to_string(&idle).unwrap(), original);
@@ -67,7 +67,7 @@ fn main() {
         power
             .query(&format!(
                 "{{\"from\":0,\"to\":{}}}",
-                remya_settings_power::history::now() + 1
+                remya_power::history::now() + 1
             ))
             .unwrap()
     );

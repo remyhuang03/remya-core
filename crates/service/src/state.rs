@@ -1,29 +1,30 @@
+use crate::paths::Roots;
 use crate::privileged::{Request, Session};
-use crate::{clipboard, notifications, osd};
 use gio::glib::{Variant, variant::ToVariant};
-use remya_settings_appearance::api as appearance;
-use remya_settings_appearance::packs::{self, ThemePacks};
-use remya_settings_appearance::text_size::{self, TextSize};
-use remya_settings_applications as applications;
-use remya_settings_background::{
+use gio::prelude::AppInfoExt;
+use remya_appearance as appearance;
+use remya_appearance::packs::{self, ThemePacks};
+use remya_appearance::text_size::{self, TextSize};
+use remya_applications as applications;
+use remya_background::{
     BackgroundManager, RealDesktop, is_accent_setting, is_background_setting, manager::Paths,
 };
-use remya_settings_date_time::api as clock;
-use remya_settings_date_time::language::{self, Language};
-use remya_settings_default_apps::{self as default_apps, DefaultApps};
-use remya_settings_display::{
+use remya_date_time as clock;
+use remya_date_time::language::{self, Language};
+use remya_default_apps::{self as default_apps, DefaultApps};
+use remya_display::{
     DisplayManager, Hyprctl, NightLight, RealSunset, atomic_write, is_display_setting,
     is_night_light_setting,
 };
-use remya_settings_fonts::{self as fonts, FontManager, RealFontconfig};
-use remya_settings_input::{self as input, Input, RealHypr};
-use remya_settings_network::{NetworkManager, is_network_setting};
-use remya_settings_printers::{self as printers, Printers, RealCups};
-use remya_settings_sound::{self as sound, Sound, pulse::RealPulse};
-use remya_settings_startup::{self as startup, Startup};
-use remya_settings_system_information::account::{self, AccountInformation};
-use remya_settings_system_information::hostname::{self, HostnameManager};
-use remya_settings_updates::{self as updates, Updates};
+use remya_fonts::{self as fonts, FontManager, RealFontconfig};
+use remya_input::{self as input, Input, RealHypr};
+use remya_network::{NetworkManager, is_network_setting};
+use remya_printers::{self as printers, Printers, RealCups};
+use remya_sound::{self as sound, Sound, pulse::RealPulse};
+use remya_startup::{self as startup, Startup};
+use remya_system_information::account::{self, AccountInformation};
+use remya_system_information::hostname::{self, HostnameManager};
+use remya_updates::{self as updates, Updates};
 use serde_json::{Value, json};
 use std::{
     fs,
@@ -34,21 +35,14 @@ use std::{
 
 pub const STYLE: &str = "themes.material-style-variant";
 pub const MODE: &str = "themes.material-theme-mode";
-pub const BAR_FOLDED_APPS: &str = "remya-bar.folded-apps";
-pub const BAR_SIDEBAR: &str = "remya-bar.sidebar-layout";
-pub const BAR_LAYOUT: &str = "remya-bar.layout";
 pub fn linked_page(id: &str) -> Option<&'static str> {
     match id {
         "power.743773bd" => Some("battery-saver"),
         "power.03bd05ee" => Some("battery-usage"),
-        "notifications.automatic-dnd" => Some("quiet-schedule"),
-        "notifications.priority" => Some("priority-notifications"),
         _ => None,
     }
 }
 
-pub const BAR_CLOCK_SECONDS: &str = "remya-bar.clock-seconds";
-pub const BAR_KEY_PREVIEW: &str = "remya-bar.keyboard-preview";
 pub const ZONE: &str = "date-time.fb2a23dc";
 pub const MANUAL: &str = "date-time.6422d209";
 pub const AUTO: &str = "date-time.db451de3";
@@ -67,73 +61,6 @@ const STYLES: &[&str] = &[
 ];
 fn invalid(message: &str) -> String {
     format!("InvalidArgument:{message}")
-}
-const BAR_PILLS: &[&str] = &[
-    "notifications",
-    "window",
-    "resources",
-    "media",
-    "workspaces",
-    "clock",
-    "tray",
-    "ai-usage",
-    "battery",
-    "sidebar",
-];
-const BAR_RESOURCES: &[&str] = &["cpu", "memory", "gpu", "network"];
-
-fn default_bar_layout() -> Value {
-    json!({
-        "groups":[["notifications","window","resources"],["workspaces","clock"],["tray"],["ai-usage","battery","sidebar"]],
-        "workspace_count":8,
-        "resources":["cpu","memory","network"],
-        "center":1,
-        "window_app_name":false,
-        "media_marquee":false,
-    })
-}
-
-fn validate_bar_layout(value: Value) -> Result<Value, String> {
-    #[derive(serde::Deserialize, serde::Serialize)]
-    #[serde(deny_unknown_fields)]
-    struct Layout {
-        groups: Vec<Vec<String>>,
-        workspace_count: u8,
-        resources: Vec<String>,
-        window_app_name: bool,
-        #[serde(default)]
-        media_marquee: bool,
-        // TOML has no null: a missing center means no centered group.
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        center: Option<usize>,
-    }
-    let error = || "Invalid Remy'a Bar layout configuration".to_owned();
-    let layout: Layout = serde_json::from_value(value).map_err(|_| error())?;
-    let mut seen = std::collections::HashSet::new();
-    let pills_valid = layout.groups.iter().all(|group| {
-        !group.is_empty()
-            && group
-                .iter()
-                .all(|id| BAR_PILLS.contains(&id.as_str()) && seen.insert(id.as_str()))
-    });
-    let mut metrics = std::collections::HashSet::new();
-    let resources_valid = !layout.resources.is_empty()
-        && layout
-            .resources
-            .iter()
-            .all(|id| BAR_RESOURCES.contains(&id.as_str()) && metrics.insert(id.as_str()));
-    // The sidebar toggle is the bar's only route to quick settings and Settings.
-    if !pills_valid
-        || !seen.contains("sidebar")
-        || !(1..=10).contains(&layout.workspace_count)
-        || !resources_valid
-        || layout
-            .center
-            .is_some_and(|center| center >= layout.groups.len())
-    {
-        return Err(error());
-    }
-    serde_json::to_value(layout).map_err(|e| e.to_string())
 }
 fn prefs(state: &clock::DateTimeState) -> Value {
     json!({"timezone":state.timezone,"ntp":state.ntp,"time_servers":state.time_servers})
@@ -194,7 +121,7 @@ fn normalize_theme(value: Value) -> Result<Value, String> {
             .as_str()
             .ok_or("Invalid Material style")?
     };
-    let mode = if theme["theme_mode"].is_null() || theme["theme_mode"] == "system" {
+    let mode = if theme["theme_mode"].is_null() {
         "light"
     } else {
         theme["theme_mode"].as_str().ok_or("Invalid theme mode")?
@@ -219,24 +146,23 @@ fn hypr_config_dir() -> PathBuf {
         .join("hypr")
 }
 
-/// Debug builds keep owned files beside the repository's local configuration.
-fn background_paths(config: &std::path::Path) -> Paths {
-    let debug = config.file_name().is_some_and(|n| n == "config.local.toml");
+/// Desktop Exec may wrap the GUI with env and escape literal percent signs.
+fn settings_executable(commandline: &str) -> Option<PathBuf> {
+    gio::glib::shell_parse_argv(commandline)
+        .ok()?
+        .into_iter()
+        .map(|arg| PathBuf::from(arg.to_string_lossy().replace("%%", "%")))
+        .find(|arg| arg.file_name().is_some_and(|name| name == "remya_settings"))
+        .and_then(gio::glib::find_program_in_path)
+}
+
+fn background_paths(roots: &Roots) -> Paths {
     let dirs = xdg::BaseDirectories::new();
-    let data = dirs.get_data_home().unwrap_or_default();
-    let cache = dirs.get_cache_home().unwrap_or_default();
-    let owned = |root: PathBuf, name: &str| {
-        if debug {
-            config.with_file_name(name)
-        } else {
-            root.join("remya/settings").join(name)
-        }
-    };
     Paths {
-        config: config.with_file_name("background.toml"),
-        accent: config.with_file_name("accent.toml"),
-        media: owned(data, "backgrounds"),
-        cache: owned(cache, "background-previews"),
+        config: roots.system.join("background.toml"),
+        accent: roots.shared.join("accent.toml"),
+        media: roots.data.join("backgrounds"),
+        cache: roots.cache.join("background-previews"),
         hyprpaper: hypr_config_dir().join("hyprpaper.conf"),
         units: dirs
             .get_config_home()
@@ -253,6 +179,7 @@ pub struct State {
     pub date: Value,
     pub hostname: HostnameManager,
     pub account: AccountInformation,
+    roots: Roots,
     config: PathBuf,
     saved: Value,
     pub theme_error: Option<String>,
@@ -270,13 +197,14 @@ pub struct State {
     pub language: Language<language::RealSystem>,
     pub appimages: applications::appimages::AppImages,
     pub network: NetworkManager,
-    pub bluetooth: remya_settings_bluetooth::Bluetooth,
-    pub proxy: remya_settings_network::proxy::Proxy,
-    pub cameras: remya_settings_camera::Cameras<remya_settings_camera::native::Native>,
+    pub bluetooth: remya_bluetooth::Bluetooth,
+    pub proxy: remya_network::proxy::Proxy,
+    pub cameras: remya_camera::Cameras<remya_camera::native::Native>,
     pub sound: Sound<RealPulse>,
-    pub power: remya_settings_power::Power,
+    pub power: remya_power::Power,
     pub updates: Updates,
-    pub storage: remya_settings_storage::Storage,
+    pub uninstalling: bool,
+    pub storage: remya_storage::Storage,
     pub printers: Printers<RealCups>,
     pub auth_error: Option<String>,
     privileged: Option<Arc<Mutex<Session>>>,
@@ -284,78 +212,81 @@ pub struct State {
     auth_attempted: bool,
     pub restart_suggested: bool,
     pub navigation: String,
-    ai: crate::ai::Ai,
+    pub requests: crate::requests::Requests,
 }
 impl State {
-    pub fn new(config: PathBuf) -> Self {
+    pub fn new(roots: Roots) -> Self {
+        let config = roots.shared.join("theme.toml");
+        let catalog: Value =
+            serde_json::from_str(include_str!("../../../assets/catalog.json")).expect("catalog");
+        let requests = crate::requests::Requests::new(&roots, &catalog);
         Self {
-            catalog: serde_json::from_str(include_str!(
-                "../../../../../assets/settings/catalog.json"
-            ))
-            .expect("catalog"),
+            catalog,
+            requests,
             theme: json!({"version":1,"theme":{"style_variant":"tonal_spot","theme_mode":"light"}}),
             system: json!({"mode":null,"targets":[]}),
             date: json!({}),
-            hostname: HostnameManager::new(config.with_file_name("hostname.toml"), atomic_write),
-            account: AccountInformation::new(config.with_file_name("avatar.png")),
+            hostname: HostnameManager::new(roots.system.join("hostname.toml"), atomic_write),
+            account: AccountInformation::new(roots.system.join("avatar.png")),
             display: DisplayManager::new(
                 Hyprctl,
                 hypr_config_dir(),
-                config.with_file_name("display.toml"),
+                roots.system.join("display.toml"),
             ),
             night_light: NightLight::new(
                 RealSunset,
                 hypr_config_dir().join("hyprsunset.conf"),
-                config.with_file_name("night-light.toml"),
+                roots.system.join("night-light.toml"),
             ),
-            background: BackgroundManager::new(RealDesktop, background_paths(&config)),
+            background: BackgroundManager::new(RealDesktop, background_paths(&roots)),
             fonts: FontManager::new(
                 RealFontconfig,
                 fonts::user_font_directory().unwrap_or_default(),
             ),
             default_apps: DefaultApps::new(
                 default_apps::RealDesktop,
-                config.with_file_name("default-apps.toml"),
+                roots.system.join("default-apps.toml"),
             ),
             startup: Startup::new(
                 startup::RealSystemd,
                 startup::Directories::detect(),
-                config.with_file_name("startup.toml"),
+                roots.system.join("startup.toml"),
             ),
             input: Input::new(
                 &input::INPUT,
                 RealHypr,
                 hypr_config_dir(),
-                config.with_file_name("input.toml"),
+                roots.system.join("input.toml"),
             ),
             desktop: Input::new(
                 &input::DESKTOP,
                 RealHypr,
                 hypr_config_dir(),
-                config.with_file_name("desktop.toml"),
+                roots.system.join("desktop.toml"),
             ),
-            themes: ThemePacks::new(config.with_file_name("themes.toml")),
-            text_size: TextSize::new(config.with_file_name("text-size.toml")),
-            language: Language::new(language::RealSystem, config.with_file_name("language.toml")),
-            bluetooth: remya_settings_bluetooth::Bluetooth::new(),
-            proxy: remya_settings_network::proxy::Proxy::new(),
-            cameras: remya_settings_camera::Cameras::new(
-                remya_settings_camera::native::Native,
-                config.with_file_name("cameras.toml"),
+            themes: ThemePacks::new(roots.system.join("themes.toml")),
+            text_size: TextSize::new(roots.system.join("text-size.toml")),
+            language: Language::new(language::RealSystem, roots.system.join("language.toml")),
+            bluetooth: remya_bluetooth::Bluetooth::new(),
+            proxy: remya_network::proxy::Proxy::new(),
+            cameras: remya_camera::Cameras::new(
+                remya_camera::native::Native,
+                roots.system.join("cameras.toml"),
             ),
             sound: Sound::new(RealPulse),
-            power: remya_settings_power::Power::new(
-                config.with_file_name("power.json"),
+            power: remya_power::Power::new(
+                roots.system.join("power.json"),
                 hypr_config_dir().join("hypridle.conf"),
-                power_history_path(&config),
+                roots.state.join("power.sqlite3"),
             ),
-            updates: Updates::new(config.with_file_name("updates.json"), atomic_write),
-            storage: remya_settings_storage::Storage::real(config.with_file_name("cleanup.toml"))
+            updates: Updates::new(roots.system.join("updates.json"), atomic_write),
+            uninstalling: false,
+            storage: remya_storage::Storage::real(roots.system.join("cleanup.toml"))
                 .expect("absolute HOME"),
-            network: NetworkManager::real(config.with_file_name("network.toml")),
+            network: NetworkManager::real(roots.system.join("network.toml")),
             printers: Printers::new(RealCups),
             appimages: applications::appimages::AppImages::real(
-                config.with_file_name("appimages.toml"),
+                roots.system.join("appimages.toml"),
             )
             .expect("absolute HOME"),
             saved: Value::Null,
@@ -367,163 +298,15 @@ impl State {
             auth_attempted: false,
             restart_suggested: false,
             navigation: "home".into(),
-            ai: crate::ai::Ai::new(config.with_file_name("remya-ai.toml")),
             config,
+            roots,
         }
     }
     fn date_file(&self) -> PathBuf {
-        self.config.with_file_name("date-time.toml")
+        self.roots.system.join("date-time.toml")
     }
-    fn bar_bool_preference(&self, id: &str, request: Option<&str>) -> Result<Value, String> {
-        let (file, field) = if id == BAR_CLOCK_SECONDS {
-            ("remya-bar.toml", "clock_seconds")
-        } else {
-            ("remya-bar-keyboard.toml", "preview")
-        };
-        let path = self.config.with_file_name(file);
-        let mut value = match load(&path)? {
-            None => true,
-            Some(config) => config
-                .as_object()
-                .filter(|object| object.len() == 1)
-                .and_then(|object| object.get(field))
-                .and_then(Value::as_bool)
-                .ok_or_else(|| {
-                    format!("Invalid Remy'a Bar configuration: {field} must be a boolean")
-                })?,
-        };
-        if let Some(request) = request {
-            value = request
-                .parse::<bool>()
-                .map_err(|_| invalid("Use true or false"))?;
-            write(&path, &json!({(field):value}))?;
-        }
-        Ok(json!({"id":id,"availability":"available","value":value}))
-    }
-    fn bar_folded_apps_file(&self) -> PathBuf {
-        self.config.with_file_name("remya-bar-tray.toml")
-    }
-    fn read_bar_folded_apps(&self) -> Result<Value, String> {
-        let ids: Vec<String> = match load(&self.bar_folded_apps_file())? {
-            None => vec![],
-            Some(config) => serde_json::from_value(config["folded_apps"].clone())
-                .map_err(|_| "Invalid Remya Bar folded applications configuration")?,
-        };
-        Ok(json!({"id":BAR_FOLDED_APPS,"availability":"available","value":ids}))
-    }
-    fn set_bar_folded_app(&self, value: &str) -> Result<Value, String> {
-        #[derive(serde::Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Change {
-            id: String,
-            folded: bool,
-        }
-        let change: Change = serde_json::from_str(value)
-            .map_err(|_| invalid("Expected a tray item id and folded boolean"))?;
-        if change.id.trim().is_empty()
-            || change.id.len() > 256
-            || change.id.chars().any(char::is_control)
-        {
-            return Err(invalid("Invalid tray item id"));
-        }
-        let mut state = self.read_bar_folded_apps()?;
-        let ids = state["value"].as_array_mut().unwrap();
-        ids.retain(|id| id != &change.id);
-        if change.folded {
-            ids.push(json!(change.id));
-        }
-        write(&self.bar_folded_apps_file(), &json!({"folded_apps":ids}))?;
-        Ok(state)
-    }
-    fn bar_layout(&self, request: Option<&str>) -> Result<Value, String> {
-        let path = self.config.with_file_name("remya-bar-layout.toml");
-        let layout = match request {
-            Some(request) => {
-                let layout = serde_json::from_str(request)
-                    .ok()
-                    .and_then(|value| validate_bar_layout(value).ok())
-                    .ok_or_else(|| invalid("Expected a valid Remy'a Bar layout"))?;
-                // Refuse to replace a malformed file the user may still repair.
-                load(&path)?.map(validate_bar_layout).transpose()?;
-                write(&path, &layout)?;
-                layout
-            }
-            None => match load(&path)? {
-                Some(saved) => validate_bar_layout(saved)?,
-                None => default_bar_layout(),
-            },
-        };
-        Ok(json!({"id":BAR_LAYOUT,"availability":"available","value":layout}))
-    }
-    fn sidebar_layout(&self, request: Option<&str>) -> Result<Value, String> {
-        const DEFAULT: &[&str] = &[
-            "internet",
-            "bluetooth",
-            "audio",
-            "night-light",
-            "dnd",
-            "power",
-            "caffeine",
-            "record",
-            "screenshot",
-            "picker",
-            "dark",
-            "dnd-quick",
-            "airplane",
-            "keyboard",
-            "clipboard",
-            "mic-mute",
-        ];
-        const RETIRED: &[&str] = &["game", "lock", "audio-switcher"];
-        let validate = |tiles: &Vec<String>| {
-            let mut seen = std::collections::HashSet::new();
-            tiles
-                .iter()
-                .all(|id| DEFAULT.contains(&id.as_str()) && seen.insert(id))
-        };
-        let path = self.config.with_file_name("remya-bar-sidebar.toml");
-        let current: Vec<String> = match load(&path)? {
-            Some(config) => {
-                let mut tiles: Vec<String> = serde_json::from_value(config["tiles"].clone())
-                    .map_err(|_| "Invalid sidebar layout configuration")?;
-                tiles.retain(|id| !RETIRED.contains(&id.as_str()));
-                if let Some(index) = tiles.iter().position(|id| id == "vpn") {
-                    if tiles.iter().any(|id| id == "dnd-quick") {
-                        return Err("Invalid sidebar layout configuration".into());
-                    }
-                    tiles[index] = "dnd-quick".into();
-                }
-                if !validate(&tiles) {
-                    return Err("Invalid sidebar layout configuration".into());
-                }
-                tiles
-            }
-            None => DEFAULT.iter().map(|id| (*id).to_owned()).collect(),
-        };
-        let tiles = if let Some(request) = request {
-            #[derive(serde::Deserialize)]
-            #[serde(deny_unknown_fields)]
-            struct LayoutChange {
-                expected: Vec<String>,
-                tiles: Vec<String>,
-            }
-            let change: LayoutChange = serde_json::from_str(request)
-                .map_err(|_| invalid("Expected the previous and new sidebar tile lists"))?;
-            if !validate(&change.tiles) {
-                return Err(invalid("Sidebar tile IDs must be known and unique"));
-            }
-            if current != change.expected {
-                return Err("Sidebar layout changed in another view. Reopen the editor.".into());
-            }
-            write(&path, &json!({"tiles":change.tiles}))?;
-            change.tiles
-        } else {
-            current
-        };
-        Ok(json!({"id":BAR_SIDEBAR,"availability":"available","value":tiles}))
-    }
-
     pub fn refresh(&mut self) {
+        self.requests.apps.lock().unwrap().rescan();
         self.theme_error = self.refresh_theme().err();
         self.date_error = self.refresh_date().err();
         let _ = self.hostname.refresh();
@@ -595,11 +378,6 @@ impl State {
         {
             return Err("Invalid saved date/time preferences".into());
         }
-        if loaded.is_none() {
-            let mut initial = saved.clone();
-            initial["version"] = json!(1);
-            write(&file, &initial)?;
-        }
         self.saved = saved;
         self.set_date(observed)?;
         Ok(())
@@ -649,6 +427,50 @@ impl State {
             Err(error) => self.auth_error = Some(error),
         }
     }
+    pub fn prepare_uninstall(
+        &mut self,
+        value: &str,
+    ) -> Result<impl FnOnce() -> Result<Value, String> + Send + use<>, String> {
+        if self.uninstalling {
+            return Err("Busy:An application uninstall is already running".into());
+        }
+        let control = self
+            .controls()
+            .into_iter()
+            .find(|control| control["id"] == applications::UNINSTALL)
+            .ok_or_else(|| invalid("Unknown setting"))?;
+        if control["availability"] != "available" {
+            return Err(format!("Unavailable:{}", control["reason"]));
+        }
+        let removal: applications::Removal = serde_json::from_str(value)
+            .map_err(|e| invalid(&format!("Invalid uninstall request: {e}")))?;
+        let session = if applications::needs_authorization(&removal.id) {
+            if self.updates.busy() {
+                return Err("Busy:Wait for the system update operation to finish".into());
+            }
+            Some(
+                self.privileged
+                    .as_ref()
+                    .ok_or_else(|| {
+                        self.auth_error
+                            .clone()
+                            .unwrap_or("Open Settings and authorize system changes first".into())
+                    })?
+                    .clone(),
+            )
+        } else {
+            None
+        };
+        self.uninstalling = true;
+        Ok(move || match session {
+            Some(shared) => shared
+                .try_lock()
+                .map_err(|_| "Busy:Another authorized operation is running")?
+                .call(&Request::Uninstall { removal }),
+            None => applications::uninstall(&removal, false),
+        })
+    }
+
     fn request(&mut self, request: Request) -> Result<Value, String> {
         if self.updates.busy() {
             return Err("Busy:Wait for the system update operation to finish".into());
@@ -708,24 +530,17 @@ impl State {
     }
     pub fn execute(&mut self, method: &str, args: &[String]) -> Result<Value, String> {
         match method {
+            "Replace" => Err(invalid("Replace requires an application setting id")),
             "Get" => {
                 let key = args[0].as_str();
                 match key {
-                    BAR_CLOCK_SECONDS | BAR_KEY_PREVIEW => self.bar_bool_preference(key, None),
-                    key if key == clipboard::ALL || clipboard::IDS.contains(&key) => {
-                        clipboard::get(key)
-                    }
-                    key if notifications::is_setting(key) => {
-                        notifications::get(&self.config, key)
-                    }
-                    key if osd::is_setting(key) => osd::get(&self.config, key),
-                    BAR_FOLDED_APPS => self.read_bar_folded_apps(),
-                    BAR_SIDEBAR => self.sidebar_layout(None),
-                    BAR_LAYOUT => self.bar_layout(None),
-                    key if crate::ai::Ai::is_get(key) => self.ai.get(key),
                     "theme" => {
                         self.refresh_theme()?;
                         Ok(self.theme.clone())
+                    }
+                    "appearance" => {
+                        self.refresh_theme()?;
+                        Ok(self.configuration()["appearance"].clone())
                     }
                     "system" => {
                         self.refresh_theme()?;
@@ -769,7 +584,7 @@ impl State {
                     _ if key.starts_with("display-brightness:") => {
                         self.display.output_brightness(&key[19..])
                     }
-                    remya_settings_display::night_light::GAMMA => {
+                    remya_display::night_light::GAMMA => {
                         Ok(self.night_light.gamma_state())
                     }
                     _ if is_display_setting(key) => {
@@ -833,16 +648,16 @@ impl State {
                     }
                     // Polled every second: answered from the last state, without a NM read.
                     "network-traffic" => Ok(self.network.traffic()),
-                    "airplane" => remya_settings_network::airplane::read(&self.bluetooth),
+                    "airplane" => remya_network::airplane::read(&self.bluetooth),
                     "proxy" => Ok(self.proxy.read()),
-                    _ if remya_settings_network::proxy::IDS.contains(&key) => self.proxy.get(key),
-                    remya_settings_network::airplane::ENABLED | remya_settings_network::airplane::WIFI => {
-                        let state = remya_settings_network::airplane::read(&self.bluetooth)?;
-                        let value = if key == remya_settings_network::airplane::ENABLED { &state["enabled"] } else { &state["wifi_enabled"] };
+                    _ if remya_network::proxy::IDS.contains(&key) => self.proxy.get(key),
+                    remya_network::airplane::ENABLED | remya_network::airplane::WIFI => {
+                        let state = remya_network::airplane::read(&self.bluetooth)?;
+                        let value = if key == remya_network::airplane::ENABLED { &state["enabled"] } else { &state["wifi_enabled"] };
                         Ok(json!({"id":key,"availability":"available","value":value}))
                     }
                     "bluetooth" => self.bluetooth.read(),
-                    _ if remya_settings_bluetooth::is_setting(key) => {
+                    _ if remya_bluetooth::is_setting(key) => {
                         let state = self.bluetooth.read()?;
                         Ok(
                             json!({"id":key,"availability":"available","reason":"Uses system BlueZ.","value":state,"error":state["error"]}),
@@ -957,7 +772,7 @@ impl State {
                         Ok(state)
                     }
                     _ if key.starts_with("calendar-date:") => Ok(
-                        json!({"value":remya_settings_date_time::format_calendar_date(&key[14..])?}),
+                        json!({"value":remya_date_time::format_calendar_date(&key[14..])?}),
                     ),
                     "input-method-tools" => applications::external_tools::read("time"),
                     _ if key.starts_with("external-tools:") => {
@@ -971,7 +786,7 @@ impl State {
                     "storage" | "cleanup" => Ok(self.storage.read(key)),
                     "printers" => Ok(self.printers.state()),
                     _ if printers::IDS.contains(&key) => Ok(self.printers.setting_value(key)),
-                    _ if remya_settings_storage::is_setting(key) => Ok(self.storage.read_setting(key)),
+                    _ if remya_storage::is_setting(key) => Ok(self.storage.read_setting(key)),
                     "updates" => {
                         self.updates.refresh();
                         Ok(self.updates.state())
@@ -987,14 +802,14 @@ impl State {
                         let _ = self.cameras.refresh();
                         Ok(self.cameras.state())
                     }
-                    _ if remya_settings_camera::is_setting(key) => {
+                    _ if remya_camera::is_setting(key) => {
                         let _ = self.cameras.refresh();
                         let mut value = self.cameras.state();
                         value["id"] = json!(key);
                         Ok(value)
                     }
                     "power" | "battery-saver" => Ok(self.power.read()),
-                    _ if remya_settings_power::is_setting(key) => Ok(self.power.read_setting(key)),
+                    _ if remya_power::is_setting(key) => Ok(self.power.read_setting(key)),
                     _ if key.starts_with("battery-history:") => self.power.query(&key[16..]),
                     "sound" => {
                         let _ = self.sound.refresh();
@@ -1015,15 +830,6 @@ impl State {
                     {
                         Ok(self.appimages.read_setting(key))
                     }
-                    "installed-apps" => applications::read(),
-                    _ if key.starts_with("installed-apps:") => applications::search(&key[15..]),
-                    _ if key.starts_with("installed-app:") => applications::details(&key[14..]),
-                    _ if applications::IDS.contains(&key) => {
-                        let mut state = applications::read()?;
-                        state["id"] = json!(key);
-                        state["availability"] = json!("available");
-                        Ok(state)
-                    }
                     "fonts" => self.fonts.families(),
                     _ if key.starts_with("font-search:") => self.fonts.search(&key[12..]),
                     _ if key.starts_with("font:") => self.fonts.details(&key[5..]),
@@ -1035,7 +841,7 @@ impl State {
                     }
                     "system-information" => {
                         let _ = self.hostname.refresh();
-                        let mut value = remya_settings_system_information::read();
+                        let mut value = remya_system_information::read();
                         value["hostname"] = self.hostname_state();
                         Ok(value)
                     }
@@ -1049,8 +855,8 @@ impl State {
                         }
                         Ok(value)
                     }
-                    _ if remya_settings_system_information::IDS.contains(&key) => {
-                        let snapshot = remya_settings_system_information::read();
+                    _ if remya_system_information::IDS.contains(&key) => {
+                        let snapshot = remya_system_information::read();
                         let mut field = snapshot["values"][key].clone();
                         field["id"] = json!(key);
                         field["availability"] = json!("available");
@@ -1086,7 +892,8 @@ impl State {
             }
             "Set" => self.set(&args[0], &args[1]),
             "List" => {
-                let controls = self.controls();
+                let mut controls = self.controls().into_iter().map(|c| json!({"id":c["id"],"title":c["title"],"availability":c["availability"],"reason":c["reason"]})).collect::<Vec<_>>();
+                controls.extend(self.requests.apps.lock().unwrap().controls());
                 let start = args[0]
                     .parse::<usize>()
                     .map_err(|_| invalid("Invalid list cursor"))?;
@@ -1095,15 +902,15 @@ impl State {
                 }
                 let end = (start + 32).min(controls.len());
                 Ok(
-                    json!({"api_version":1,"next_cursor":if end<controls.len(){Some(end.to_string())}else{None},"controls":controls[start..end].iter().map(|c|json!({"id":c["id"],"title":c["title"],"availability":c["availability"],"reason":c["reason"]})).collect::<Vec<_>>()}),
+                    json!({"api_version":1,"next_cursor":if end<controls.len(){Some(end.to_string())}else{None},"controls":controls[start..end],"apps":self.requests.apps.lock().unwrap().list()}),
                 )
             }
             "Search" => {
                 let query = args[0].to_lowercase();
                 let terms = query.split_whitespace().collect::<Vec<_>>();
-                Ok(
-                    json!({"pages":self.catalog["pages"].as_array().unwrap().iter().filter(|p|{let text=p.to_string().to_lowercase();terms.iter().all(|term|text.contains(term))}).map(|p|json!({"id":p["id"],"title":p["title"],"category":p["category"]})).collect::<Vec<_>>()}),
-                )
+                let mut pages = self.catalog["pages"].as_array().unwrap().iter().filter(|p|{let text=p.to_string().to_lowercase();terms.iter().all(|term|text.contains(term))}).map(|p|json!({"id":p["id"],"title":p["title"],"category":p["category"]})).collect::<Vec<_>>();
+                pages.extend(self.requests.apps.lock().unwrap().search(&args[0]));
+                Ok(json!({"pages":pages}))
             }
             "Open" => {
                 let page = &args[0];
@@ -1123,11 +930,12 @@ impl State {
                         return Err(invalid("Unknown page"));
                     }
                     self.navigation = page.clone();
-                    self.ensure_idle();
                     self.open_gui()?;
+                    self.ensure_idle();
                 }
                 Ok(json!({"opened":page}))
             }
+            "Manage" => self.manage(&args[0]),
             "Resolve" => self.resolve(&args[0], &args[1]),
             "Reload" => {
                 self.refresh();
@@ -1183,6 +991,7 @@ impl State {
                 }
                 Ok(json!({"closed":true}))
             }
+            "Quit" if self.uninstalling => Err("Busy:Wait for the application uninstall to finish".into()),
             "Quit" if self.updates.busy() => Err("Busy:An update operation is running; wait for it to finish before quitting the service".into()),
             "Quit" if self.storage.busy() => Err("Busy:A storage operation is running; wait for it to finish before quitting the service".into()),
             "Quit" => Ok(json!({"quitting":true})),
@@ -1190,35 +999,29 @@ impl State {
         }
     }
     pub fn ensure_idle(&self) {
+        if !self.roots.system.join("power.json").exists() {
+            return;
+        }
         if let Err(error) = self.power.ensure_idle() {
             eprintln!("hypridle startup: {error}");
         }
     }
 
     fn set(&mut self, key: &str, value: &str) -> Result<Value, String> {
-        if key == remya_settings_power::idle::START_ID {
+        if key == remya_power::idle::START_ID {
             if value != "start" {
                 return Err(invalid("Use start to ensure hypridle is running"));
             }
             self.power.ensure_idle()?;
             return Ok(json!({"running":true}));
         }
-        if key == BAR_SIDEBAR {
-            return self.sidebar_layout(Some(value));
-        }
-        if crate::ai::SET_IDS.contains(&key) {
-            return self.ai.set(key, value);
-        }
-        if key == BAR_LAYOUT {
-            return self.bar_layout(Some(value));
-        }
-        if key == remya_settings_display::night_light::GAMMA {
+        if key == remya_display::night_light::GAMMA {
             return self.night_light.set_gamma(value);
         }
         if let Some(output) = key.strip_prefix("display-brightness:") {
             return self.display.set_output_brightness(output, value);
         }
-        if remya_settings_power::is_setting(key) {
+        if remya_power::is_setting(key) {
             return self.power.set(key, value);
         }
         let control = self
@@ -1228,9 +1031,6 @@ impl State {
             .ok_or_else(|| invalid("Unknown setting"))?;
         if control["availability"] != "available" {
             return Err(format!("Unavailable:{}", control["reason"]));
-        }
-        if clipboard::IDS.contains(&key) {
-            return clipboard::set(key, value);
         }
         if printers::IDS.contains(&key) {
             return self.printers.set(key, value);
@@ -1245,19 +1045,19 @@ impl State {
             return self.account.set(key, value, atomic_write);
         }
         if [
-            remya_settings_network::airplane::ENABLED,
-            remya_settings_network::airplane::WIFI,
+            remya_network::airplane::ENABLED,
+            remya_network::airplane::WIFI,
         ]
         .contains(&key)
         {
-            let result = remya_settings_network::airplane::set(&self.bluetooth, key, value);
+            let result = remya_network::airplane::set(&self.bluetooth, key, value);
             let _ = self.network.refresh();
             return result;
         }
-        if remya_settings_network::proxy::IDS.contains(&key) {
+        if remya_network::proxy::IDS.contains(&key) {
             return self.proxy.set(key, value);
         }
-        if remya_settings_bluetooth::is_setting(key) {
+        if remya_bluetooth::is_setting(key) {
             return self.bluetooth.set(key, value);
         }
         if is_network_setting(key) {
@@ -1286,23 +1086,24 @@ impl State {
         if default_apps::IDS.contains(&key) {
             return self.default_apps.set(key, value);
         }
-        if remya_settings_storage::is_setting(key) {
+        if remya_storage::is_setting(key) {
+            if self.uninstalling {
+                return Err("Busy:Wait for the application uninstall to finish".into());
+            }
             if self.updates.busy() {
                 return Err("Busy:Wait for the system update operation to finish".into());
             }
             let request = match key {
                 "cleanup.package-cache" => {
-                    let p: remya_settings_storage::packages::PackageCache =
-                        remya_settings_storage::payload(value)?;
-                    remya_settings_storage::packages::validate_keep(p.keep)?;
+                    let p: remya_storage::packages::PackageCache = remya_storage::payload(value)?;
+                    remya_storage::packages::validate_keep(p.keep)?;
                     Some(Request::PackageCache {
                         keep: p.keep,
                         uninstalled: p.uninstalled,
                     })
                 }
                 "cleanup.orphans" => {
-                    let p: remya_settings_storage::packages::RemovePackages =
-                        remya_settings_storage::payload(value)?;
+                    let p: remya_storage::packages::RemovePackages = remya_storage::payload(value)?;
                     Some(Request::RemovePackages {
                         packages: p.packages,
                     })
@@ -1329,12 +1130,15 @@ impl State {
             return self.storage.set(key, value);
         }
         if updates::is_setting(key) {
+            if self.uninstalling {
+                return Err("Busy:Wait for the application uninstall to finish".into());
+            }
             if self.storage.busy() {
                 return Err("Busy:Wait for the storage operation to finish".into());
             }
             return self.updates.set(key, value);
         }
-        if remya_settings_camera::is_setting(key) {
+        if remya_camera::is_setting(key) {
             return self.cameras.set(key, value);
         }
         if sound::is_setting(key) {
@@ -1350,16 +1154,7 @@ impl State {
             return applications::external_tools::open(key);
         }
         if applications::IDS.contains(&key) {
-            if key != applications::UNINSTALL {
-                return Err("ReadOnly:Read installed-apps or installed-app:<desktop-id>".into());
-            }
-            let removal: applications::Removal = serde_json::from_str(value)
-                .map_err(|e| invalid(&format!("Invalid uninstall request: {e}")))?;
-            return if applications::needs_authorization(&removal.id) {
-                self.request(Request::Uninstall { removal })
-            } else {
-                applications::uninstall(&removal, false)
-            };
+            return Err("ReadOnly:Read installed-apps or installed-app:<desktop-id>".into());
         }
         if key == hostname::RENAME {
             hostname::validate_name(value)?;
@@ -1367,7 +1162,7 @@ impl State {
             let expected = self.hostname.prepare(value)?;
             return self.rename_hostname(value, expected);
         }
-        if remya_settings_system_information::IDS.contains(&key) {
+        if remya_system_information::IDS.contains(&key) {
             return Err("ReadOnly:System information cannot be changed".into());
         }
         if is_display_setting(key) {
@@ -1418,18 +1213,6 @@ impl State {
             self.refresh_theme()?;
             self.theme_error = None;
             return Ok(self.theme.clone());
-        }
-        if key == BAR_FOLDED_APPS {
-            return self.set_bar_folded_app(value);
-        }
-        if notifications::IDS.contains(&key) {
-            return notifications::set(&self.config, key, value);
-        }
-        if osd::IDS.contains(&key) {
-            return osd::set(&self.config, key, value);
-        }
-        if matches!(key, BAR_CLOCK_SECONDS | BAR_KEY_PREVIEW) {
-            return self.bar_bool_preference(key, Some(value));
         }
         self.refresh_date()?;
         let (request, keys) = match key {
@@ -1492,6 +1275,42 @@ impl State {
         let state = self.privileged(request)?;
         self.save_date(state, &keys)
     }
+    fn manage(&mut self, feature: &str) -> Result<Value, String> {
+        match feature {
+            "display" => self.display.manage()?,
+            "night-light" => self.night_light.manage()?,
+            "input" => self.input.manage()?,
+            "desktop" => self.desktop.manage()?,
+            "themes" => self.themes.manage()?,
+            "text-size" => self.text_size.manage()?,
+            "language" => self.language.manage()?,
+            "hostname" => self.hostname.manage()?,
+            "default-apps" => self.default_apps.manage()?,
+            "startup" => self.startup.manage()?,
+            "network" => self.network.manage()?,
+            "background" => self.background.manage()?,
+            "power" => self.power.manage()?,
+            "cameras" => self.cameras.manage()?,
+            "cleanup" => self.storage.manage()?,
+            "appimages" => self.appimages.manage()?,
+            "updates" => self.updates.manage()?,
+            "appearance" => {
+                self.refresh_theme()?;
+                return Ok(self.configuration()["appearance"].clone());
+            }
+            "date-time" => {
+                self.refresh_date()?;
+                let mut snapshot = self.saved.clone();
+                snapshot["version"] = json!(1);
+                if !self.date_file().try_exists().map_err(|e| e.to_string())? {
+                    write(&self.date_file(), &snapshot)?;
+                }
+            }
+            _ => return Err(invalid("Unknown feature")),
+        }
+        self.execute("Get", &[feature.into()])
+    }
+
     fn resolve(&mut self, feature: &str, source: &str) -> Result<Value, String> {
         if feature == "power" {
             return self.power.resolve(source);
@@ -1662,12 +1481,11 @@ impl State {
                 self.auth_attempted = false;
                 self.auth_error = None;
             }
-            let binary = std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .parent()
-                .and_then(|p| p.parent())
-                .ok_or("Missing bundle")?
-                .join("remya_settings");
+            let binary = gio::DesktopAppInfo::new("top.remya.settings.desktop")
+                .and_then(|app| app.commandline())
+                .and_then(|command| settings_executable(&command.to_string_lossy()))
+                .or_else(|| gio::glib::find_program_in_path("remya_settings"))
+                .ok_or("Unavailable:Remya Settings is not installed")?;
             self.gui = Some(
                 Command::new(binary)
                     .args(["--gui", &self.navigation])
@@ -1691,53 +1509,12 @@ impl Drop for State {
 mod tests {
     use super::*;
     #[test]
-    fn bar_layout_validates_pills_options_and_requires_the_sidebar() {
-        let valid = default_bar_layout();
-        assert_eq!(validate_bar_layout(valid.clone()).unwrap(), valid);
-        let mut saved_without_marquee = valid.clone();
-        saved_without_marquee
-            .as_object_mut()
-            .unwrap()
-            .remove("media_marquee");
-        assert_eq!(validate_bar_layout(saved_without_marquee).unwrap(), valid);
-        let with = |key: &str, value: Value| {
-            let mut layout = valid.clone();
-            layout[key] = value;
-            layout
-        };
-        for layout in [
-            with("groups", json!([["clock"]])),
-            with("groups", json!([["sidebar", "sidebar"]])),
-            with("groups", json!([["sidebar"], []])),
-            with("groups", json!([["sidebar", "weather"]])),
-            with("workspace_count", json!(0)),
-            with("workspace_count", json!(11)),
-            with("resources", json!([])),
-            with("resources", json!(["cpu", "cpu"])),
-            with("resources", json!(["disk"])),
-            with("window_app_name", json!("yes")),
-            with("media_marquee", json!("yes")),
-            with("media_marquee", Value::Null),
-            with("unknown", json!(true)),
-            with("center", json!(4)),
-            with("center", json!(-1)),
-        ] {
-            assert!(validate_bar_layout(layout).is_err());
-        }
-        let custom = json!({"groups":[["sidebar"],["clock","workspaces"]],"workspace_count":5,"resources":["network","cpu"],"window_app_name":false,"media_marquee":true,"center":1});
-        assert_eq!(validate_bar_layout(custom.clone()).unwrap(), custom);
-    }
-    #[test]
     fn theme_schema_matches_existing_client_defaults_and_validation() {
         assert_eq!(
             normalize_theme(json!({"version":1})).unwrap()["theme"]["style_variant"],
             "tonal_spot"
         );
-        assert_eq!(
-            normalize_theme(json!({"version":1,"theme":{"theme_mode":"system"}})).unwrap()["theme"]
-                ["theme_mode"],
-            "light"
-        );
+        assert!(normalize_theme(json!({"version":1,"theme":{"theme_mode":"system"}})).is_err());
         for value in [
             json!({"version":2}),
             json!({"version":1,"unknown":true}),
@@ -1771,38 +1548,87 @@ mod tests {
         assert_eq!(fs::read_to_string(&target).unwrap(), "bad [");
     }
     #[test]
-    fn tray_fold_state_survives_service_restart() {
+    fn gui_desktop_command_resolves_env_wrappers_and_percent_escapes() {
+        use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
-        let config = root.path().join("config.toml");
-        let mut state = State::new(config.clone());
+        let dir = root.path().join("Settings % home");
+        fs::create_dir(&dir).unwrap();
+        let binary = dir.join("remya_settings");
+        fs::write(&binary, "#!/bin/sh\n").unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o755)).unwrap();
+        let quoted = gio::glib::shell_quote(binary.to_str().unwrap().replace('%', "%%"));
+        let quoted = quoted.to_str().unwrap();
         assert_eq!(
-            state.execute("Get", &[BAR_FOLDED_APPS.into()]).unwrap()["value"],
-            json!([])
+            settings_executable(&format!("/usr/bin/env {quoted} %U")),
+            Some(binary.clone())
         );
-        assert_eq!(
+        assert_eq!(settings_executable(quoted), Some(binary.clone()));
+        fs::remove_file(binary).unwrap();
+        assert_eq!(settings_executable(quoted), None);
+        assert_eq!(settings_executable("'unterminated"), None);
+    }
+
+    #[test]
+    fn manage_is_explicit_validated_and_returns_the_get_payload() {
+        let root = tempfile::tempdir().unwrap();
+        let roots = Roots::detect(Some(root.path().into())).unwrap();
+        let path = roots.system.join("appimages.toml");
+        let mut state = State::new(roots);
+        state.execute("Get", &["appimages".into()]).unwrap();
+        assert!(!path.exists());
+        assert!(
             state
-                .execute(
-                    "Set",
-                    &[
-                        BAR_FOLDED_APPS.into(),
-                        json!({"id":"my-app","folded":true}).to_string()
-                    ]
-                )
-                .unwrap()["value"],
-            json!(["my-app"])
+                .execute("Manage", &["unknown".into()])
+                .unwrap_err()
+                .starts_with("InvalidArgument:")
         );
+        let managed = state.execute("Manage", &["appimages".into()]).unwrap();
+        assert!(path.is_file());
         assert_eq!(
-            State::new(config)
-                .execute("Get", &[BAR_FOLDED_APPS.into()])
-                .unwrap()["value"],
-            json!(["my-app"])
+            managed,
+            state.execute("Get", &["appimages".into()]).unwrap()
         );
+    }
+
+    #[test]
+    fn unlocked_uninstall_preserves_guards_and_clears_them_on_failure() {
+        let root = tempfile::tempdir().unwrap();
+        let mut state = State::new(Roots::detect(Some(root.path().into())).unwrap());
+        let value = json!({"id":"flatpak:user:../bad/stable","token":"test"}).to_string();
+        let work = state.prepare_uninstall(&value).unwrap();
+        assert!(state.uninstalling);
+        assert!(state.prepare_uninstall(&value).is_err());
+        for (method, args) in [
+            ("Set", vec![updates::CHECK.into(), "check".into()]),
+            ("Set", vec!["cleanup.package-cache".into(), "{}".into()]),
+            ("Quit", vec![]),
+        ] {
+            assert!(
+                state
+                    .execute(method, &args)
+                    .unwrap_err()
+                    .starts_with("Busy:")
+            );
+        }
+        // The malformed reference fails validation before any package command runs.
+        assert!(work().unwrap_err().starts_with("InvalidArgument:"));
+        state.uninstalling = false;
+        let requests = state.requests.clone();
+        let state = Mutex::new(state);
+        assert!(
+            requests
+                .execute(&state, "Set", &[applications::UNINSTALL.into(), value])
+                .unwrap()
+                .unwrap_err()
+                .starts_with("InvalidArgument:")
+        );
+        assert!(!state.lock().unwrap().uninstalling);
     }
 
     #[test]
     fn catalog_parity_bounds_and_unknown_operations() {
         let root = tempfile::tempdir().unwrap();
-        let mut state = State::new(root.path().join("config"));
+        let mut state = State::new(Roots::detect(Some(root.path().into())).unwrap());
         assert_eq!(
             state.execute("Get", &["page:date-time".into()]).unwrap()["id"],
             "date-time"
@@ -1820,6 +1646,15 @@ mod tests {
                 .unwrap_err()
                 .starts_with("InvalidArgument:")
         );
+        assert!(state.requests.is_app_setting("remya-bar.layout"));
+        for id in [
+            "installed-app:top.remya.bar",
+            "font:Family.2",
+            "ai.provider/name",
+            "sound.volume",
+        ] {
+            assert!(!state.requests.is_app_setting(id), "{id}");
+        }
         assert!(state.execute("Get", &["unknown".into()]).is_err());
         assert!(
             state
@@ -1828,20 +1663,4 @@ mod tests {
                 .starts_with("Unavailable:")
         );
     }
-}
-
-fn power_history_path(config: &std::path::Path) -> PathBuf {
-    if config
-        .file_name()
-        .is_some_and(|name| name == "config.local.toml")
-    {
-        return config.with_file_name("power.sqlite3");
-    }
-    let root = std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .unwrap_or_else(|| {
-            PathBuf::from(std::env::var_os("HOME").unwrap_or_default()).join(".local/state")
-        });
-    root.join("remya/settings/power.sqlite3")
 }

@@ -1,6 +1,6 @@
-"""Exercise the installed CLI and D-Bus API in isolated XDG and session-bus state.
+"""Exercise the standalone CLI and D-Bus API in isolated XDG and session-bus state.
 
-Requires both release bundles and a running graphical session. System appearance
+Requires the Core release binaries and a running graphical session. System appearance
 writes stay inside a temporary HOME/config root and the keyfile GSettings backend.
 """
 import ast
@@ -20,13 +20,13 @@ import time
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
-BUS = 'top.remya.settings.Service1'
-INTERFACE = 'top.remya.settings.Settings1'
-OBJECT = '/top/remya/settings'
+BUS = 'top.remya.Core1'
+INTERFACE = 'top.remya.Core1'
+OBJECT = '/top/remya/Core1'
 
 
 def cli(*args, ok=True):
-    executable = Path(os.environ['HOME']) / '.local/bin/remya_settings'
+    executable = ROOT / 'target/release/remya'
     result = subprocess.run([str(executable), *args], capture_output=True, text=True, timeout=40)
     assert (result.returncode == 0) == ok, (args, result.stdout, result.stderr)
     return json.loads(result.stdout) if ok else result.stderr
@@ -308,186 +308,18 @@ def installed_apps_checks():
     print('PASS: native package readback and authorization rejection, real isolated user Flatpak uninstall, stale-version rejection, retained data, CLI/D-Bus parity',flush=True)
 
 
-def bar_clock_checks():
-    setting = 'remya-bar.clock-seconds'
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-bar.toml'
-    assert not config.exists()
-    assert cli('get', setting) == dbus('Get', setting) == {
-        'id': setting, 'availability': 'available', 'value': True,
-    }
-    monitor = subprocess.Popen(
-        ['stdbuf', '-oL', 'gdbus', 'monitor', '--session', '--dest', BUS],
-        stdout=subprocess.PIPE,
-    )
-    try:
-        assert select.select([monitor.stdout], [], [], 5)[0]
-        os.read(monitor.stdout.fileno(), 4096)
-        assert cli('set', setting, 'false') == dbus('Get', setting)
-        assert cli('get', setting)['value'] is False
-        assert select.select([monitor.stdout], [], [], 5)[0]
-    finally:
-        monitor.terminate()
-        signals = monitor.communicate(timeout=5)[0].decode()
-    assert f"'{setting}'" in signals, signals
-    assert config.read_text().strip() == 'clock_seconds = false'
-    assert 'InvalidArgument' in cli('set', setting, 'maybe', ok=False)
-    assert cli('get', setting)['value'] is False
-    assert dbus('Set', setting, 'true') == cli('get', setting)
-    assert cli('get', setting)['value'] is True
-    config.write_text('clock_seconds = "invalid"\n')
-    cli('get', setting, ok=False)
-    cli('set', setting, 'false', ok=False)
-    assert config.read_text() == 'clock_seconds = "invalid"\n'
-    config.unlink()
-    print('PASS: Bar clock default, CLI and D-Bus read/write parity, Changed, persistence and invalid input')
 
 
-def notification_checks():
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/notifications.toml'
-    dnd, start, apps = 'notifications.do-not-disturb', 'quiet-schedule.start', 'priority-notifications.apps'
-    assert not config.exists()
-    assert cli('get', 'notifications') == dbus('Get', 'notifications')
-    assert cli('get', 'notifications')['value']['popup_duration'] == 5
-    assert cli('get', dnd) == dbus('Get', dnd) == {'id': dnd, 'availability': 'available', 'value': False}
-    monitor = subprocess.Popen(
-        ['stdbuf', '-oL', 'gdbus', 'monitor', '--session', '--dest', BUS],
-        stdout=subprocess.PIPE,
-    )
-    try:
-        assert select.select([monitor.stdout], [], [], 5)[0]
-        os.read(monitor.stdout.fileno(), 4096)
-        assert cli('set', dnd, 'true') == dbus('Get', dnd)
-        assert dbus('Set', start, '23:30') == cli('get', start)
-        app = '{"id":"org.telegram.desktop","name":"Telegram","priority":true}'
-        assert cli('set', apps, app)['value'] == [{'id': 'org.telegram.desktop', 'name': 'Telegram'}]
-        assert select.select([monitor.stdout], [], [], 5)[0]
-    finally:
-        monitor.terminate()
-        signals = monitor.communicate(timeout=5)[0].decode()
-    assert all(f"'{topic}'" in signals for topic in (dnd, start, apps)), signals
-    saved = config.read_text()
-    assert 'do_not_disturb = true' in saved and 'schedule_start = "23:30"' in saved
-    for setting, value in [(dnd, 'maybe'), (start, '24:00'), ('notifications.popup-duration', '61')]:
-        assert 'InvalidArgument' in cli('set', setting, value, ok=False)
-    config.write_text('popup_duration = 0\n')
-    cli('get', dnd, ok=False)
-    cli('set', dnd, 'false', ok=False)
-    assert config.read_text() == 'popup_duration = 0\n'
-    config.unlink()
-    print('PASS: notification defaults, CLI and D-Bus parity, Changed, persistence and invalid input')
 
 
-def bar_tray_checks():
-    setting = 'remya-bar.folded-apps'
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-bar-tray.toml'
-    assert cli('get', setting) == dbus('Get', setting)
-    assert cli('get', setting)['value'] == []
-    assert cli('set', setting, '{"id":"app-a","folded":true}') == dbus('Get', setting)
-    assert dbus('Set', setting, '{"id":"app-b","folded":true}') == cli('get', setting)
-    assert cli('get', setting)['value'] == ['app-a', 'app-b']
-    assert cli('set', setting, '{"id":"app-a","folded":false}')['value'] == ['app-b']
-    assert 'InvalidArgument' in cli('set', setting, '{"id":"","folded":true}', ok=False)
-    assert cli('get', setting)['value'] == ['app-b']
-    config.write_text('folded_apps = false\n')
-    cli('set', setting, '{"id":"app-b","folded":false}', ok=False)
-    assert config.read_text() == 'folded_apps = false\n'
-    config.unlink()
-    print('PASS: Bar tray CLI and D-Bus parity, per-app edits, validation and persistence')
 
 
-def bar_layout_checks():
-    setting = 'remya-bar.layout'
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-bar-layout.toml'
-    initial = cli('get', setting)
-    assert initial == dbus('Get', setting)
-    assert not config.exists()
-    assert initial['value']['groups'] == [['notifications', 'window', 'resources'], ['workspaces', 'clock'], ['tray'], ['ai-usage', 'battery', 'sidebar']]
-    assert initial['value']['center'] == 1
-    assert initial['value']['resources'] == ['cpu', 'memory', 'network']
-    assert initial['value']['media_marquee'] is False
-    assert initial['value']['window_app_name'] is False
-    custom = {'groups': [['clock', 'media'], ['sidebar']], 'workspace_count': 5, 'resources': ['cpu'], 'window_app_name': False, 'media_marquee': True, 'center': 0}
-    assert cli('set', setting, json.dumps(custom)) == dbus('Get', setting)
-    assert cli('get', setting)['value'] == custom
-    for invalid in ({**custom, 'groups': [['clock']]}, {**custom, 'workspace_count': 11}, {**custom, 'resources': []}, {**custom, 'media_marquee': 'true'}, {**custom, 'center': 2}):
-        assert 'InvalidArgument' in cli('set', setting, json.dumps(invalid), ok=False)
-    assert dbus('Set', setting, json.dumps(initial['value'])) == cli('get', setting)
-    config.write_text(config.read_text().replace('media_marquee = false\n', ''))
-    assert cli('get', setting) == initial == dbus('Get', setting)
-    config.write_text('groups = false\n')
-    cli('get', setting, ok=False)
-    cli('set', setting, json.dumps(custom), ok=False)
-    assert config.read_text() == 'groups = false\n'
-    config.unlink()
-    print('PASS: bar layout CLI and D-Bus parity, validation and persistence')
 
 
-def sidebar_layout_checks():
-    setting = 'remya-bar.sidebar-layout'
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-bar-sidebar.toml'
-    initial = cli('get', setting)
-    assert initial == dbus('Get', setting)
-    assert not config.exists()
-    assert 'mic-mute' in initial['value']
-    assert 'dnd-quick' in initial['value']
-    assert not {'game', 'lock', 'audio-switcher', 'vpn'}.intersection(initial['value'])
-    config.write_text('tiles = ["audio", "game", "vpn", "caffeine", "lock", "audio-switcher"]\n')
-    previous = ['audio', 'dnd-quick', 'caffeine']
-    assert cli('get', setting)['value'] == previous
-    assert dbus('Get', setting)['value'] == previous
-    assert 'InvalidArgument' in cli('set', setting, json.dumps({'expected': previous, 'tiles': ['game']}), ok=False)
-    assert 'InvalidArgument' in cli('set', setting, json.dumps({'expected': previous, 'tiles': ['vpn']}), ok=False)
-    new = ['audio', 'internet', 'mic-mute']
-    assert cli('set', setting, json.dumps({'expected': previous, 'tiles': new})) == dbus('Get', setting)
-    assert cli('get', setting)['value'] == new
-    assert 'InvalidArgument' in cli('set', setting, json.dumps({'expected': new, 'tiles': ['audio', 'audio']}), ok=False)
-    assert 'changed in another view' in cli('set', setting, json.dumps({'expected': [], 'tiles': []}), ok=False)
-    assert dbus('Set', setting, json.dumps({'expected': new, 'tiles': []})) == cli('get', setting)
-    config.write_text('tiles = false\n')
-    cli('set', setting, '{"expected":[],"tiles":[]}', ok=False)
-    assert config.read_text() == 'tiles = false\n'
-    config.unlink()
-    print('PASS: sidebar layout CLI and D-Bus parity, concurrent edit detection and persistence')
 
 
-def keyboard_preview_checks():
-    setting = 'remya-bar.keyboard-preview'
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-bar-keyboard.toml'
-    assert cli('get', setting) == dbus('Get', setting) == {
-        'id': setting, 'availability': 'available', 'value': True,
-    }
-    assert not config.exists()
-    assert cli('set', setting, 'false') == dbus('Get', setting)
-    assert cli('get', setting)['value'] is False
-    assert config.read_text().strip() == 'preview = false'
-    assert 'InvalidArgument' in cli('set', setting, 'maybe', ok=False)
-    assert dbus('Set', setting, 'true') == cli('get', setting)
-    config.write_text('preview = "invalid"\n')
-    cli('set', setting, 'false', ok=False)
-    assert config.read_text() == 'preview = "invalid"\n'
-    config.unlink()
 
 
-def bar_osd_checks():
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-bar-osd.toml'
-    assert not config.exists()
-    initial = {'id': 'remya-bar.osd', 'availability': 'available', 'value': {'volume_step': 5, 'volume_max': 150, 'brightness_step': 5, 'gamma_min': 10}}
-    assert cli('get', 'remya-bar.osd') == dbus('Get', 'remya-bar.osd') == initial
-    for setting, expected in [('remya-bar.volume-step', 5), ('remya-bar.volume-max', 150), ('remya-bar.brightness-step', 5), ('remya-bar.gamma-min', 10)]:
-        assert cli('get', setting) == dbus('Get', setting) == {'id': setting, 'availability': 'available', 'value': expected}
-    assert cli('set', 'remya-bar.volume-step', '10') == dbus('Get', 'remya-bar.volume-step') == {'id': 'remya-bar.volume-step', 'availability': 'available', 'value': 10}
-    assert dbus('Set', 'remya-bar.volume-max', '120') == cli('get', 'remya-bar.volume-max') == {'id': 'remya-bar.volume-max', 'availability': 'available', 'value': 120}
-    assert dbus('Set', 'remya-bar.brightness-step', '8') == cli('get', 'remya-bar.brightness-step') == {'id': 'remya-bar.brightness-step', 'availability': 'available', 'value': 8}
-    assert cli('set', 'remya-bar.gamma-min', '25') == dbus('Get', 'remya-bar.gamma-min') == {'id': 'remya-bar.gamma-min', 'availability': 'available', 'value': 25}
-    assert cli('get', 'remya-bar.osd')['value'] == {'volume_step': 10, 'volume_max': 120, 'brightness_step': 8, 'gamma_min': 25}
-    for setting, bad in [('remya-bar.volume-step', '0'), ('remya-bar.volume-step', '26'), ('remya-bar.volume-max', '99'), ('remya-bar.volume-max', '151'), ('remya-bar.brightness-step', '0'), ('remya-bar.gamma-min', '9'), ('remya-bar.gamma-min', '91')]:
-        assert 'InvalidArgument' in cli('set', setting, bad, ok=False)
-    config.write_text('volume_step = "invalid"\n')
-    cli('get', 'remya-bar.osd', ok=False)
-    cli('set', 'remya-bar.volume-step', '5', ok=False)
-    assert config.read_text() == 'volume_step = "invalid"\n'
-    config.unlink()
-    print('PASS: Bar OSD preferences CLI and D-Bus parity, validation and persistence')
 
 FAKE_CODEXBAR = r'''#!/usr/bin/env python3
 import json, sys
@@ -510,7 +342,7 @@ else:
 
 def ai_checks():
     """The fake CodexBar on PATH has no config file, so nothing outside the isolated root is read or written."""
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/remya-ai.toml'
+    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/shared/ai.toml'
     initial = cli('get', 'ai.providers')
     assert initial == dbus('Get', 'ai.providers')
     value = initial['value']
@@ -519,31 +351,84 @@ def ai_checks():
     assert value['providers'][0]['windows'] == [{'slot': 'primary', 'label': '5h', 'windowMinutes': 300, 'usedPercent': 40.0, 'resetsAt': '2026-01-01T00:00:00Z'}]
     assert 'cursor' in [row['id'] for row in value['catalog']]
     assert 'mail' not in json.dumps(initial).lower()
-    assert value['bar'] == {'pinned': [], 'lowPercent': 20, 'showUsed': False, 'ringOrder': '5h-outer'}
-    assert cli('get', 'ai.bar') == dbus('Get', 'ai.bar') == {'id': 'ai.bar', 'availability': 'available', 'value': value['bar']}
     assert not config.exists()
-    changed = cli('set', 'ai.bar', json.dumps({'pinned': ['claude'], 'lowPercent': 15, 'showUsed': True, 'ringOrder': '5h-inner'}))
-    assert changed == dbus('Get', 'ai.providers')
-    assert changed['value']['bar'] == {'pinned': ['claude'], 'lowPercent': 15, 'showUsed': True, 'ringOrder': '5h-inner'}
-    saved = config.read_text()
-    assert 'pinned = ["claude"]' in saved and 'low_percent = 15' in saved and 'show_used = true' in saved and 'ring_order = "5h-inner"' in saved, saved
-    for invalid in ({'pinned': ['cursor']}, {'pinned': ['claude', 'claude']}, {'pinned': ['a', 'b', 'c', 'd']}, {'lowPercent': 0}, {'lowPercent': 101}, {'ringOrder': 'bad'}, {}, {'unknown': 1}):
-        assert 'InvalidArgument' in cli('set', 'ai.bar', json.dumps(invalid), ok=False)
-    assert config.read_text() == saved
-    assert dbus('Set', 'ai.bar', json.dumps(json.dumps({'pinned': [], 'lowPercent': 20, 'showUsed': False, 'ringOrder': '5h-outer'})))['value']['bar'] == value['bar']
-    assert cli('get', 'ai.bar')['value'] == value['bar']
     assert 'InvalidArgument' in cli('get', 'ai.provider/unknown', ok=False)
-    config.unlink()
-    print('PASS: AI providers CLI and D-Bus parity, e-mail stripping, ai.bar round trip, validation and persistence')
+    print('PASS: AI providers CLI and D-Bus parity, e-mail stripping and provider validation')
+
+
+def app_preferences_checks():
+    registration = Path(os.environ['XDG_DATA_HOME']) / 'remya/apps/remya-smoke.json'
+    registration.parent.mkdir(parents=True, exist_ok=True)
+    registration.write_text(json.dumps({
+        'version': 1, 'id': 'remya-smoke', 'app': 'top.remya.smoke',
+        'title': 'Remya smoke', 'icon': 'top.remya.smoke', 'config': 'smoke',
+        'pages': [{'id': 'layout', 'title': 'Layout', 'keywords': ['pill']}],
+        'settings': {'size': {'title': 'Module size', 'page': 'layout', 'keywords': ['modules'],
+                             'default': 2, 'schema': {'type': 'integer', 'minimum': 1}}},
+    }))
+    # Created after service startup: an unknown prefix must trigger discovery.
+    key = 'remya-smoke.size'
+    initial = cli('get', key)
+    assert initial['value'] == 2 and initial == dbus('Get', key)
+    apps = cli('list')['apps']
+    assert any(app['id'] == 'remya-smoke' and 'error' not in app for app in apps)
+    found = cli('search', 'modules')['pages']
+    assert any(p.get('app') == 'remya-smoke' and p['page'] == 'layout' for p in found)
+    watcher = subprocess.Popen([str(ROOT / 'target/release/remya'), 'watch', 'all'],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert select.select([watcher.stdout], [], [], 10)[0]
+        watcher.stdout.readline()  # Initial theme; signal subscription is already active.
+        changed = cli('set', key, '3')
+        assert changed == dbus('Get', key) and changed['revision'] != initial['revision']
+        assert select.select([watcher.stdout], [], [], 10)[0], 'App preference Changed was not emitted'
+        event = json.loads(watcher.stdout.readline())
+        assert event == {'topic': key, 'value': changed}, event
+        replaced = dbus('Replace', key, '4', changed['revision'])
+        assert replaced == cli('get', key)
+        assert 'Changed in another view. Reopen the editor.' in cli('replace', key, '5', changed['revision'], ok=False)
+        replaced = cli('replace', key, '5', replaced['revision'])
+        assert replaced == dbus('Get', key)
+        assert 'InvalidArgument' in cli('set', key, 'null', ok=False)
+        assert 'Unavailable' in cli('get', 'not-installed.size', ok=False)
+        assert 'Unavailable' in cli('open-app', 'remya-smoke', 'layout', ok=False)
+        import tomllib
+        path = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/smoke/settings.toml'
+        assert tomllib.loads(path.read_text()) == {'size': 5}
+        path.write_text('size = [')
+        assert cli('set', key, '6', ok=False)
+        assert path.read_text() == 'size = ['
+    finally:
+        watcher.terminate()
+        watcher.wait(timeout=5)
+    print('PASS: generic app preferences discovery, CLI/D-Bus Get/Set/Replace, Changed, schema rejection and atomic file preservation', flush=True)
+
+
+def app_preferences_session():
+    service = subprocess.Popen([str(ROOT / 'target/release/remyad')])
+    try:
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                dbus('List', '0')
+                break
+            except subprocess.CalledProcessError:
+                assert service.poll() is None and time.monotonic() < deadline
+                time.sleep(0.1)
+        app_preferences_checks()
+    finally:
+        service.terminate()
+        service.wait(timeout=10)
 
 
 def session_checks():
     pid = None
     watcher = None
-    bar = None
-    before = None
+    service = subprocess.Popen([str(ROOT / 'target/release/remyad')])
+    time.sleep(0.5)
     try:
         initial = cli('get', 'theme')
+        app_preferences_checks()
         tools = cli('get', 'input-method-tools')
         assert tools == dbus('Get', 'input-method-tools')
         for group in ('time','system','appearance'):
@@ -558,14 +443,7 @@ def session_checks():
         assert 'InvalidArgument' in cli('set','time-more.fcitx5','invalid',ok=False)
         pid = service_pid()
         assert initial == dbus('Get', 'theme')
-        bar_clock_checks()
-        keyboard_preview_checks()
-        bar_osd_checks()
-        notification_checks()
-        bar_tray_checks()
-        bar_layout_checks()
         ai_checks()
-        sidebar_layout_checks()
         default_apps_checks()
         startup_checks()
         night_light_checks()
@@ -595,8 +473,9 @@ def session_checks():
         assert cli('get', 'date-time.fb2a23dc')['value'] == clock['timezone']
         assert 'InvalidArgument' in cli('set', 'date-time.fb2a23dc', 'Invalid/Zone', ok=False)
         assert 'InvalidArgument' in cli('set', 'date-time.6422d209', '{}', ok=False)
-        zone_config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/date-time.toml'
+        zone_config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/date-time.toml'
         alternate = next(zone for zone in zones if zone != clock['timezone'])
+        cli('manage', 'date-time')
         zone_config.write_text('version = 1\ntimezone = ' + json.dumps(alternate) + '\n')
         assert cli('get', 'configuration')['date-time']['conflict']
         assert not cli('resolve', 'date-time', 'system')['date-time']['conflict']
@@ -615,14 +494,14 @@ def session_checks():
         background = cli('get', 'background')
         assert background['initialized'] and background == dbus('Get', 'background')
         assert cli('get', 'configuration')['background']['initialized']
-        assert (Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/background.toml').exists()
+        assert not (Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/background.toml').exists()
         assert 'InvalidArgument' in cli('set', 'background.56c289eb', 'stretch', ok=False)
         assert 'InvalidArgument' in cli('set', 'background.99b01ada', 'slideshow', ok=False)
         assert 'InvalidArgument' in cli('set', 'background.9e58290b', 'relative.png', ok=False)
         assert 'InvalidArgument' in cli('set', 'background.display', 'DP-1', ok=False)
         accent = cli('get', 'accent')
         assert accent['source'] == 'custom' and accent == dbus('Get', 'accent')
-        assert not (Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/accent.toml').exists()
+        assert not (Path(os.environ['XDG_CONFIG_HOME']) / 'remya/shared/accent.toml').exists()
         assert cli('set', 'themes.6f67371e', '#123abc')['color'] == '#123ABC'
         assert dbus('Get', 'accent')['color'] == '#123ABC'
         assert cli('get', 'theme')['theme'].keys() == {'style_variant', 'theme_mode'}
@@ -648,7 +527,9 @@ def session_checks():
         assert hostname == dbus('Get', 'hostname')
         assert hostname['initialized'] and not hostname['conflict'] and hostname['error'] is None
         assert cli('get', 'about.0f142010')['value'] == hostname['static_hostname']
-        hostname_file = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/hostname.toml'
+        hostname_file = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/hostname.toml'
+        assert not hostname_file.exists()
+        assert cli('manage', 'hostname') == dbus('Get', 'hostname')
         assert 'static_hostname' in hostname_file.read_text()
         assert 'InvalidArgument' in cli('set', 'about.0f142010', 'Bad Name', ok=False)
         hostname_file.write_text('version = 1\nstatic_hostname = "saved-hostname"\n')
@@ -692,7 +573,7 @@ def session_checks():
             assert 'InvalidArgument' in cli(operation, target, ok=False)
         assert cli('search', 'material')['pages']
         assert cli('reload')['theme'] == dbus('Get', 'theme')
-        executable = Path(os.environ['HOME']) / '.local/bin/remya_settings'
+        executable = ROOT / 'target/release/remya'
         watcher = subprocess.Popen([str(executable), 'watch', 'all'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         assert select.select([watcher.stdout], [], [], 5)[0], 'No initial watch state'
         assert json.loads(watcher.stdout.readline())['topic'] == 'theme'
@@ -700,7 +581,7 @@ def session_checks():
         dbus('Set', 'themes.material-style-variant', 'neutral')
         assert select.select([watcher.stdout], [], [], 5)[0], 'No D-Bus theme signal'
         assert json.loads(watcher.stdout.readline())['value']['theme']['style_variant'] == 'neutral'
-        config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/config.toml'
+        config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/shared/theme.toml'
         valid = config.read_text()
         config.write_text('invalid TOML [')
         time.sleep(1)
@@ -709,64 +590,10 @@ def session_checks():
         config.write_text(valid)
         time.sleep(1)
         assert cli('get', 'theme')['theme']['style_variant'] == 'neutral'
-        # The release bar must consume the service, with one view on every output.
-        before = {monitor['name']: monitor['reserved'] for monitor in json.loads(subprocess.check_output(['hyprctl', 'monitors', '-j']))}
-        bar = subprocess.Popen([str(Path(os.environ['HOME']) / '.local/bin/remya_bar')], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        deadline = time.monotonic() + 10
-        bars = []
-        while time.monotonic() < deadline:
-            layers = json.loads(subprocess.check_output(['hyprctl', 'layers', '-j']))
-            bars = [layer for monitor in layers.values() for level in monitor['levels'].values() for layer in level if layer['pid'] == bar.pid]
-            if len(bars) == len(before):
-                break
-            assert bar.poll() is None, 'Installed bar exited'
-            time.sleep(0.1)
-        assert len(bars) == len(before)
-        assert all(layer['namespace'] == 'top.remya.bar' and layer['h'] == 40 for layer in bars)
-        assert not any(client['pid'] == bar.pid for client in json.loads(subprocess.check_output(['hyprctl', 'clients', '-j'])))
-        time.sleep(1)
-        def samples():
-            colors = []
-            for layer in bars:
-                png = subprocess.check_output(['grim', '-s', '1', '-g', f"{layer['x']},{layer['y']} {layer['w']}x40", '-'])
-                image = Image.open(io.BytesIO(png)).convert('RGB')
-                colors.append(image.getpixel((10, 20)))
-            return colors
-        dark = samples()
-        cli('set', 'themes.material-theme-mode', 'light')
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            light = samples()
-            if all(sum(now) > sum(previous) + 200 for previous, now in zip(dark, light)):
-                break
-            time.sleep(0.2)
-        else:
-            raise AssertionError(('Bar did not follow settings on all outputs', dark, light))
-        print(f'PASS: installed bar on {len(bars)} outputs follows live D-Bus Light/Dark changes', flush=True)
-        assert cli('open', 'system-information') == {'opened': 'system-information'}
-        assert cli('open', 'about') == {'opened': 'about'}
-        deadline = time.monotonic() + 5
-        while time.monotonic() < deadline:
-            clients = json.loads(subprocess.check_output(['hyprctl', 'clients', '-j']))
-            if any(client['class'] == 'top.remya.settings' and Path(f"/proc/{client['pid']}/exe").resolve().is_relative_to(Path(os.environ['XDG_DATA_HOME'])) for client in clients):
-                break
-            time.sleep(0.1)
-        else:
-            raise AssertionError('Open did not show the settings window')
-        assert cli('set', 'power.743773bd', 'open') == {'opened': 'battery-saver'}
-        assert dbus('Set', 'power.03bd05ee', 'open') == {'opened': 'battery-usage'}
-        for page in ('defaults', 'installed', 'date-time', 'updates'):
-            assert cli('open', page) == {'opened': page}
-        subprocess.run(['gtk-launch', 'top.remya.settings'], check=True, timeout=5)
-        assert len([client for client in json.loads(subprocess.check_output(['hyprctl', 'clients', '-j'])) if client['class'] == 'top.remya.settings' and Path(f"/proc/{client['pid']}/exe").resolve().is_relative_to(Path(os.environ['XDG_DATA_HOME']))]) == 1
+        # The GUI is an independent optional install, outside this Core test.
         assert cli('quit') == {'quitting': True}
-        print('PASS: installed CLI/D-Bus parity, activation without UI, actual isolated Rust writes/readback, signals, validation/recovery, navigation, and quit')
+        print('PASS: standalone CLI/D-Bus parity, activation without UI, actual isolated Rust writes/readback, signals, validation/recovery, navigation, and quit')
     finally:
-        if bar is not None:
-            bar.terminate()
-            bar.wait(timeout=5)
-            monitors = json.loads(subprocess.check_output(['hyprctl', 'monitors', '-j']))
-            assert all(monitor['reserved'] == before[monitor['name']] for monitor in monitors), 'Bar reserved space was not released'
         if watcher is not None:
             watcher.terminate()
             watcher.wait(timeout=5)
@@ -854,10 +681,10 @@ def startup_checks():
     assert "'startup'" in signals, signals
     print('PASS: startup isolated XDG discovery, CLI/D-Bus Get/Set/Resolve parity, overrides/readback, candidates, add-app, command, remove, strict validation and Changed', flush=True)
 def storage_checks():
-    """Use the installed CLI and existing isolated session; never run cleanup."""
+    """Use the standalone CLI and existing isolated session; never run cleanup."""
     import tomllib
 
-    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/settings/cleanup.toml'
+    config = Path(os.environ['XDG_CONFIG_HOME']) / 'remya/system/cleanup.toml'
     config.parent.mkdir(parents=True, exist_ok=True)
     # Keep the preference round trips from making an automatic run due.
     config.write_text('version = 1\n[automatic]\nenabled = false\nfrequency = "low-space"\ntrash_days = 0\ncache_days = 0\ndownloads_days = 0\n[last_run]\nat = ' + str(int(time.time()) + 86400) + '\nfreed_bytes = 0\n')
@@ -896,6 +723,9 @@ def storage_checks():
 
 
 def main():
+    if '--app-preferences-session' in sys.argv:
+        app_preferences_session()
+        return
     if '--session' in sys.argv:
         session_checks()
         return
@@ -906,11 +736,11 @@ def main():
                            XDG_STATE_HOME=str(home / 'state'), GSETTINGS_BACKEND='keyfile',
                            HYPRLAND_CONFIG=str(home / 'hyprland.lua'), NO_AT_BRIDGE='1', GIO_USE_VFS='local', GTK_USE_PORTAL='0')
         (home / 'hyprland.lua').write_text('-- Isolated appearance smoke-test entrypoint\n')
-        subprocess.run([sys.executable, str(ROOT / 'tool/install.py')], env=environment, check=True)
-        subprocess.run([sys.executable, str(ROOT.parent / 'remya-bar/tool/install.py')], env=environment, check=True)
-        for entry in ('top.remya.settings', 'top.remya.settings.appimage'):
-            subprocess.run(['desktop-file-validate', str(home / f'data $/applications/{entry}.desktop')], check=True)
         environment['XDG_CONFIG_DIRS'] = str(home / 'system-config')
+        if '--app-preferences' in sys.argv:
+            subprocess.run(['dbus-run-session', '--', sys.executable, str(Path(__file__).resolve()), '--app-preferences-session'],
+                           env=environment, check=True, timeout=120)
+            return
         startup_fixtures(environment)
         default_apps_fixtures(environment)
         installed_apps_fixture(environment)

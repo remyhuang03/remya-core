@@ -56,10 +56,10 @@ class Bluetooth(bluetooth.Stub):
 
 
 def call(method, *args, cli=False, ok=True):
-    command = [str(ROOT / 'build/linux/x64/release/bundle/libexec/remya_settings_cli'),
+    command = [str(ROOT / 'target/release/remya'),
                method.lower(), *args] if cli else [
         'gdbus', 'call', '--session', '--dest', bluetooth.BUS,
-        '--object-path', '/top/remya/settings', '--method', f'{bluetooth.API}.{method}', *args]
+        '--object-path', '/top/remya/Core1', '--method', f'{bluetooth.API}.{method}', *args]
     result = subprocess.run(command, capture_output=True, text=True, timeout=30)
     assert (result.returncode == 0) == ok, (command, result.stdout, result.stderr)
     if not ok:
@@ -69,12 +69,12 @@ def call(method, *args, cli=False, ok=True):
 
 def session(root):
     assert os.environ['DBUS_SYSTEM_BUS_ADDRESS'].startswith(f'unix:path={root}/')
-    service = subprocess.Popen([str(ROOT / 'target/release/remya-settings-service'), '--debug-root', root],
+    service = subprocess.Popen([str(ROOT / 'target/release/remyad'), '--debug-root', root],
                                stdout=subprocess.DEVNULL)
     try:
         for _ in range(100):
             probe = subprocess.run(['gdbus', 'call', '--session', '--dest', bluetooth.BUS,
-                                    '--object-path', '/top/remya/settings', '--method', f'{bluetooth.API}.Get',
+                                    '--object-path', '/top/remya/Core1', '--method', f'{bluetooth.API}.Get',
                                     'about'], capture_output=True)
             if probe.returncode == 0:
                 break
