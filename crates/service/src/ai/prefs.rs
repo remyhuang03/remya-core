@@ -1,54 +1,12 @@
-//! `remya-ai.toml`: Bar quota preferences and custom OpenAI-compatible endpoints.
+//! `ai.toml`: shared custom OpenAI-compatible endpoints.
 use serde::{Deserialize, Serialize};
 use std::{collections::HashSet, fs, path::Path};
-
-pub const MAX_PINNED: usize = 3;
-const DEFAULT_LOW_PERCENT: u8 = 20;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct Prefs {
-    #[serde(default)]
-    pub bar: Bar,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom: Vec<Custom>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum RingOrder {
-    #[default]
-    #[serde(rename = "5h-outer")]
-    FiveHourOuter,
-    #[serde(rename = "5h-inner")]
-    FiveHourInner,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Bar {
-    #[serde(default)]
-    pub pinned: Vec<String>,
-    #[serde(default = "default_low_percent")]
-    pub low_percent: u8,
-    #[serde(default)]
-    pub show_used: bool,
-    #[serde(default)]
-    pub ring_order: RingOrder,
-}
-
-impl Default for Bar {
-    fn default() -> Self {
-        Self {
-            pinned: Vec::new(),
-            low_percent: DEFAULT_LOW_PERCENT,
-            show_used: false,
-            ring_order: RingOrder::FiveHourOuter,
-        }
-    }
-}
-
-fn default_low_percent() -> u8 {
-    DEFAULT_LOW_PERCENT
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -59,21 +17,6 @@ pub struct Custom {
     pub base_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub models_dev: Option<String>,
-}
-
-pub fn validate_pinned(pinned: &[String]) -> Result<(), String> {
-    let mut seen = HashSet::new();
-    if pinned.len() > MAX_PINNED || !pinned.iter().all(|id| seen.insert(id)) {
-        return Err(format!("Pin at most {MAX_PINNED} unique providers"));
-    }
-    Ok(())
-}
-
-pub fn validate_low_percent(value: i64) -> Result<u8, String> {
-    u8::try_from(value)
-        .ok()
-        .filter(|value| (1..=100).contains(value))
-        .ok_or_else(|| "Low quota percent must be between 1 and 100".into())
 }
 
 /// Accepts https endpoints, or http only on a loopback host. Credentials in
@@ -132,8 +75,6 @@ pub fn custom_id(name: &str) -> Option<String> {
 
 impl Prefs {
     pub fn validate(&self) -> Result<(), String> {
-        validate_pinned(&self.bar.pinned)?;
-        validate_low_percent(self.bar.low_percent.into())?;
         let mut ids = HashSet::new();
         for custom in &self.custom {
             let slug = custom.id.strip_prefix("custom-").unwrap_or_default();
@@ -169,30 +110,13 @@ impl Prefs {
     pub fn save(&self, path: &Path) -> Result<(), String> {
         self.validate()?;
         let text = toml::to_string(self).map_err(|e| e.to_string())?;
-        remya_settings_display::atomic_write(path, text.as_bytes())
+        remya_display::atomic_write(path, text.as_bytes())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pins_are_capped_and_unique() {
-        let ids = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        assert!(validate_pinned(&ids(&["claude", "codex", "antigravity"])).is_ok());
-        assert!(validate_pinned(&ids(&["a", "b", "c", "d"])).is_err());
-        assert!(validate_pinned(&ids(&["claude", "claude"])).is_err());
-    }
-
-    #[test]
-    fn low_percent_bounds() {
-        assert_eq!(validate_low_percent(1), Ok(1));
-        assert_eq!(validate_low_percent(100), Ok(100));
-        assert!(validate_low_percent(0).is_err());
-        assert!(validate_low_percent(101).is_err());
-        assert!(validate_low_percent(-5).is_err());
-    }
 
     #[test]
     fn base_url_requires_https_or_loopback_http() {
@@ -231,15 +155,9 @@ mod tests {
     #[test]
     fn toml_round_trip_and_rejection() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("remya-ai.toml");
+        let path = directory.path().join("ai.toml");
         assert_eq!(Prefs::load(&path).unwrap(), Prefs::default());
         let prefs = Prefs {
-            bar: Bar {
-                pinned: vec!["claude".into(), "codex".into()],
-                low_percent: 15,
-                show_used: true,
-                ring_order: RingOrder::FiveHourInner,
-            },
             custom: vec![Custom {
                 id: "custom-my-endpoint".into(),
                 name: "My Endpoint".into(),
@@ -249,16 +167,9 @@ mod tests {
         };
         prefs.save(&path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
-        assert!(
-            text.contains("[bar]") && text.contains("[[custom]]"),
-            "{text}"
-        );
+        assert!(text.contains("[[custom]]"), "{text}");
         assert_eq!(Prefs::load(&path).unwrap(), prefs);
-        fs::write(&path, "[bar]\nring_order = \"other\"\n").unwrap();
-        assert!(Prefs::load(&path).is_err());
-        fs::write(&path, "[bar]\nlow_percent = 0\n").unwrap();
-        assert!(Prefs::load(&path).is_err());
-        fs::write(&path, "[bar]\nunknown = 1\n").unwrap();
+        fs::write(&path, "unknown = 1\n").unwrap();
         assert!(Prefs::load(&path).is_err());
     }
 }

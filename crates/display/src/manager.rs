@@ -82,6 +82,7 @@ struct Pending {
     output: String,
     changes: Vec<(String, String)>,
     previous: Vec<(String, String)>,
+    initial_saved: Option<BTreeMap<String, Prefs>>,
     deadline: Instant,
 }
 
@@ -264,7 +265,7 @@ impl<C: Compositor> DisplayManager<C> {
                 }
             }
         }
-        if changed {
+        if existed && changed {
             self.write_saved(&saved)?;
         }
         self.saved = saved;
@@ -275,6 +276,15 @@ impl<C: Compositor> DisplayManager<C> {
         let result = self.reconcile();
         self.error = result.as_ref().err().cloned();
         result
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.saved_path.try_exists().map_err(|e| e.to_string())? {
+            self.write_saved(&self.saved)?;
+        }
+        Ok(())
     }
 
     fn monitor(&self, name: &str) -> Result<&Monitor, String> {
@@ -498,16 +508,32 @@ impl<C: Compositor> DisplayManager<C> {
                 )
             })
             .collect::<Vec<_>>();
+        let unmanaged = !self.saved_path.try_exists().map_err(|e| e.to_string())?;
         self.apply_live(name, &changes)?;
         if let Err(error) = self.wait_for(name, &changes) {
             return Err(self.with_revert(name, &previous, error));
         }
         let risky = changes.iter().any(|(f, _)| RISKY.contains(&f.as_str()));
         if risky && confirm > 0 {
+            let initial_saved = if unmanaged {
+                let snapshot = self.saved.clone();
+                let mut next = snapshot.clone();
+                next.entry(name.to_owned())
+                    .or_default()
+                    .extend(changes.clone());
+                if let Err(error) = self.write_saved(&next) {
+                    return Err(self.with_revert(name, &previous, error));
+                }
+                self.saved = next;
+                Some(snapshot)
+            } else {
+                None
+            };
             self.pending = Some(Pending {
                 output: name.to_owned(),
                 changes,
                 previous,
+                initial_saved,
                 deadline: Instant::now() + Duration::from_secs(confirm.min(60)),
             });
             return Ok(());
@@ -532,7 +558,7 @@ impl<C: Compositor> DisplayManager<C> {
                 return Err(invalid("Use detect"));
             }
             self.brightness.forget_detection();
-            self.refresh()?;
+            self.manage()?;
             return Ok(self.state());
         }
         if READ_ONLY.contains(&id) {
@@ -576,11 +602,10 @@ impl<C: Compositor> DisplayManager<C> {
                 }
             }
             "revert" => {
-                let pending = self
-                    .pending
-                    .take()
-                    .ok_or_else(|| invalid("No pending change"))?;
-                self.revert_live(&pending.output, &pending.previous)?;
+                if self.pending.is_none() {
+                    return Err(invalid("No pending change"));
+                }
+                self.revert_pending()?;
             }
             "system" => {
                 self.require_no_pending()?;
@@ -616,6 +641,7 @@ impl<C: Compositor> DisplayManager<C> {
             }
             _ => return Err(invalid("Unknown resolution")),
         }
+        self.manage()?;
         self.error = None;
         self.refresh()?;
         Ok(self.state())
@@ -639,7 +665,14 @@ impl<C: Compositor> DisplayManager<C> {
         let Some(pending) = self.pending.take() else {
             return Ok(());
         };
-        let result = self.revert_live(&pending.output, &pending.previous);
+        let result = (|| {
+            self.revert_live(&pending.output, &pending.previous)?;
+            if let Some(saved) = pending.initial_saved {
+                self.write_saved(&saved)?;
+                self.saved = saved;
+            }
+            Ok(())
+        })();
         self.error = result.as_ref().err().cloned();
         result
     }
@@ -1014,8 +1047,53 @@ mod tests {
         s.manager.refresh().unwrap();
         assert!(s.world.0.lock().unwrap().evals.is_empty());
         assert_eq!(rules(&s), "");
-        let saved = fs::read_to_string(s.root.path().join("display.toml")).unwrap();
-        assert!(saved.contains("[outputs.A]"));
+        let path = s.root.path().join("display.toml");
+        assert!(!path.exists());
+        s.world.0.lock().unwrap().monitors[0].transform = 1;
+        s.manager.refresh().unwrap();
+        assert_eq!(s.manager.state()["conflict"], false);
+        assert_eq!(s.manager.saved["A"]["transform"], "1");
+        s.manager.manage().unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("[outputs.A]"));
+        s.world.0.lock().unwrap().monitors[0].transform = 2;
+        s.manager.refresh().unwrap();
+        assert_eq!(s.manager.state()["conflict"], true);
+        fs::remove_file(path).unwrap();
+        s.manager.refresh().unwrap();
+        assert_eq!(s.manager.state()["conflict"], false);
+    }
+
+    #[test]
+    fn first_set_saves_a_complete_snapshot() {
+        let mut s = setup();
+        s.manager.set(TRANSFORM, &request("A", "1")).unwrap();
+        let saved = s.manager.read_saved().unwrap().unwrap();
+        assert_eq!(saved["A"]["transform"], "1");
+        for monitor in &s.manager.outputs {
+            assert_eq!(saved[&monitor.name], s.manager.observed(monitor));
+        }
+        assert_eq!(saved.len(), 2);
+    }
+
+    #[test]
+    fn first_pending_set_saves_the_applied_snapshot_and_revert_restores_it() {
+        let mut s = setup();
+        s.manager
+            .set(
+                TRANSFORM,
+                &json!({"output":"A","value":"1","confirm_seconds":10}).to_string(),
+            )
+            .unwrap();
+        assert_eq!(
+            s.manager.read_saved().unwrap().unwrap()["A"]["transform"],
+            "1"
+        );
+        s.manager.revert_pending().unwrap();
+        s.manager.refresh().unwrap();
+        assert_eq!(
+            s.manager.read_saved().unwrap().unwrap()["A"]["transform"],
+            "0"
+        );
         assert_eq!(s.manager.state()["conflict"], false);
     }
 
@@ -1068,6 +1146,7 @@ mod tests {
     fn external_change_is_a_conflict_with_both_resolutions() {
         let mut s = setup();
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         s.world.0.lock().unwrap().monitors[0].transform = 3;
         s.manager.refresh().unwrap();
         let state = s.manager.state();
@@ -1093,6 +1172,7 @@ mod tests {
     fn disconnected_outputs_keep_their_values_and_raise_no_conflict() {
         let mut s = setup();
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         s.world.0.lock().unwrap().monitors.pop();
         s.manager.refresh().unwrap();
         assert_eq!(s.manager.state()["conflict"], false);
@@ -1103,6 +1183,7 @@ mod tests {
     fn failed_settings_resolution_retains_the_conflict() {
         let mut s = setup();
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         {
             let mut w = s.world.0.lock().unwrap();
             w.monitors[0].transform = 3;
@@ -1181,6 +1262,7 @@ mod tests {
     fn rejected_changes_leave_the_system_and_saved_values_alone() {
         let mut s = setup();
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         let before = fs::read_to_string(s.root.path().join("display.toml")).unwrap();
         s.world.0.lock().unwrap().fail_eval = true;
         assert!(s.manager.set(TRANSFORM, &request("A", "1")).is_err());

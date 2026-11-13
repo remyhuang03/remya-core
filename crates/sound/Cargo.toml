@@ -1,5 +1,5 @@
 [package]
-name = "remya_settings_sound"
+name = "remya_sound"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

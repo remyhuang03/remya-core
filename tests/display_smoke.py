@@ -5,7 +5,7 @@ Runs a nested compositor with headless outputs, a private session bus, and isola
 XDG roots, so the user's displays and configuration are never touched. A small
 nested window appears for the duration of the test.
 
-    python test/display_smoke.py [path/to/remya-settings-service]
+    python test/display_smoke.py [path/to/remyad]
 """
 import json
 import os
@@ -17,9 +17,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SERVICE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "target/debug/remya-settings-service"
-DEST = ("--session", "--dest", "top.remya.settings.Service1", "--object-path", "/top/remya/settings")
-METHOD = "top.remya.settings.Settings1."
+SERVICE = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "target/debug/remyad"
+DEST = ("--session", "--dest", "top.remya.Core1", "--object-path", "/top/remya/Core1")
+METHOD = "top.remya.Core1."
 SCALE, TRANSFORM, LAYOUT = "display.12e2ed4d", "display.9843ad76", "display.7cb5dc06"
 POSITION, RESERVED = "display.position", "display.reserved-area"
 
@@ -111,12 +111,14 @@ def main():
             return json.dumps(body)
 
         rules = hypr / "monitors.lua"
-        saved = config / "remya/settings/display.toml"
+        saved = config / "remya/system/display.toml"
 
         # First use adopts the system and writes nothing to it.
         data = state()
         assert data["error"] is None and data["write_blocked"] is None, data
-        assert not data["conflict"] and saved.exists()
+        assert not data["conflict"] and not saved.exists()
+        assert call("Manage", "display") == state()
+        assert saved.exists()
         assert rules.read_text().startswith("-- user comment"), "rule file changed on first use"
         assert "SMOKE" not in rules.read_text()
 

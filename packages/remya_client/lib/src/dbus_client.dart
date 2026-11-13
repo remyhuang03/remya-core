@@ -3,14 +3,17 @@ import 'dart:convert';
 
 import 'package:dbus/dbus.dart';
 
-const settingsBusName = 'top.remya.settings.Service1';
-const settingsInterface = 'top.remya.settings.Settings1';
-const settingsObjectPath = '/top/remya/settings';
+const settingsBusName = 'top.remya.Core1';
+const settingsInterface = 'top.remya.Core1';
+const settingsObjectPath = '/top/remya/Core1';
 
 /// Method arity is shared by CLI validation, clients, and server introspection.
 const settingsMethods = {
   'Get': 1,
+  'Manage': 1,
   'Set': 2,
+  'Replace': 3,
+  'OpenApp': 2,
   'List': 1,
   'Search': 1,
   'Open': 1,
@@ -57,6 +60,10 @@ class SettingsClient {
     return jsonDecode(reply.returnValues.single.asString())
         as Map<String, dynamic>;
   }
+
+  /// Opt a feature into persistence after reading its current system snapshot.
+  Future<Map<String, dynamic>> manage(String feature) =>
+      call('Manage', [feature]);
 
   Stream<SettingsChange> get changes =>
       DBusRemoteObjectSignalStream(

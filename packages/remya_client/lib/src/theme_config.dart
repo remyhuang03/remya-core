@@ -67,8 +67,7 @@ class ThemeConfig {
       throw const FormatException('Invalid theme table');
     }
     final style = theme['style_variant'] ?? 'tonal_spot';
-    final stored = theme['theme_mode'];
-    final mode = stored == 'system' ? 'light' : stored ?? 'light';
+    final mode = theme['theme_mode'] ?? 'light';
     if (!styles.contains(style) || !const {'light', 'dark'}.contains(mode)) {
       throw const FormatException('Invalid Material style or theme mode');
     }

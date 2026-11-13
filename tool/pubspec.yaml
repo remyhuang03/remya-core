@@ -1,0 +1,8 @@
+name: remya_cli
+publish_to: none
+environment:
+  sdk: ^3.13.7
+dependencies:
+  dbus: ^0.8.0
+  remya_client:
+    path: ../packages/remya_client

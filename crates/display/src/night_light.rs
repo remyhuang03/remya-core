@@ -294,11 +294,7 @@ impl<S: Sunset> NightLight<S> {
                 Some(saved)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                let prefs = self.system.as_ref().map(|c| c.prefs.clone());
-                if let Some(prefs) = &prefs {
-                    self.save(prefs)?;
-                }
-                prefs
+                self.system.as_ref().map(|c| c.prefs.clone())
             }
             Err(e) => return Err(format!("{}: {e}", self.saved_path.display())),
         };
@@ -309,6 +305,19 @@ impl<S: Sunset> NightLight<S> {
         let result = self.read();
         self.error = result.as_ref().err().cloned();
         result
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.saved_path.try_exists().map_err(|e| e.to_string())? {
+            self.save(
+                self.saved
+                    .as_ref()
+                    .ok_or("Night light cannot be detected")?,
+            )?;
+        }
+        Ok(())
     }
 
     fn save(&self, prefs: &Prefs) -> Result<(), String> {
@@ -535,7 +544,7 @@ impl<S: Sunset> NightLight<S> {
     }
 
     pub fn set(&mut self, key: &str, value: &str) -> Result<Value, String> {
-        let result = self.apply(key, value);
+        let result = self.apply(key, value).and_then(|()| self.manage());
         let _ = self.refresh();
         if let Err(message) = &result
             && !message.starts_with("InvalidArgument:")
@@ -699,6 +708,8 @@ mod tests {
             fs::read_to_string(root.path().join("hyprsunset.conf")).unwrap(),
             WARM
         );
+        assert!(!root.path().join("saved.toml").exists());
+        night.manage().unwrap();
         assert!(root.path().join("saved.toml").exists());
     }
 
@@ -784,6 +795,7 @@ mod tests {
     fn conflict_is_preserved_until_either_resolution() {
         let (root, fake, mut night) = manager(Some(WARM));
         night.refresh().unwrap();
+        night.manage().unwrap();
         let path = root.path().join("hyprsunset.conf");
         let edited = WARM.replace("2600", "4000");
         fs::write(&path, &edited).unwrap();

@@ -15,7 +15,7 @@ pub mod xkb;
 pub use config::{DESKTOP, INPUT};
 use config::{File, Group, Shortcut, WorkspaceRule};
 use keys::{Keys, Layout};
-use remya_settings_display::{Hyprctl, atomic_write, run_bytes};
+use remya_display::{Hyprctl, atomic_write, run_bytes};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -441,15 +441,9 @@ impl<H: Hypr> Input<H> {
                 }
                 Some(saved)
             }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => match &self.observed.file {
-                // First use adopts what the system does now and changes nothing.
-                Some(file) => {
-                    let saved = self.system(file);
-                    self.save(&saved)?;
-                    Some(saved)
-                }
-                None => None,
-            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                self.observed.file.as_ref().map(|file| self.system(file))
+            }
             Err(e) => return Err(format!("{}: {e}", self.saved_path.display())),
         };
         Ok(())
@@ -459,6 +453,19 @@ impl<H: Hypr> Input<H> {
         let result = self.read();
         self.error = result.as_ref().err().cloned();
         result
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.saved_path.try_exists().map_err(|e| e.to_string())? {
+            self.save(
+                self.saved
+                    .as_ref()
+                    .ok_or("Compositor configuration cannot be detected")?,
+            )?;
+        }
+        Ok(())
     }
 
     fn system(&self, file: &File) -> Saved {
@@ -1189,7 +1196,7 @@ impl<H: Hypr> Input<H> {
     }
 
     pub fn set(&mut self, id: &str, input: &str) -> Result<Value, String> {
-        let result = self.apply(id, input);
+        let result = self.apply(id, input).and_then(|()| self.manage());
         self.finish(result)
     }
 

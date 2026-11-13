@@ -188,6 +188,18 @@ impl Schedule {
             blocked: false,
         }
     }
+    pub fn manage(&mut self) -> Result<(), String> {
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+        if let Some(path) = &self.path
+            && !path.try_exists().map_err(|e| e.to_string())?
+        {
+            self.persist(self.configuration.clone())?;
+        }
+        Ok(())
+    }
+
     pub fn state(&self) -> Value {
         let c = &self.configuration;
         json!({"enabled":c.enabled,"active_start":c.active_start,"active_end":c.active_end,"last_run_day":c.last_run_day,"notice":c.notice,"error":self.error,"editable":!self.blocked})

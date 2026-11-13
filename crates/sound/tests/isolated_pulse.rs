@@ -1,6 +1,6 @@
-//! Run with `cargo test -p remya_settings_sound --test isolated_pulse -- --ignored`.
+//! Run with `cargo test -p remya_sound --test isolated_pulse -- --ignored`.
 //! Every process and native connection uses a new private runtime directory.
-use remya_settings_sound::{Backend, Direction, Sound, pulse::RealPulse};
+use remya_sound::{Backend, Direction, Sound, pulse::RealPulse};
 use serde_json::json;
 use std::{
     path::Path,
@@ -235,7 +235,5 @@ fn native_controls_and_stream_routes_use_private_audio_server() {
         .unwrap();
     assert_eq!(observed.device, output);
     assert!(observed.preferences.muted);
-    assert!(
-        (remya_settings_sound::volume_percent(&observed.preferences.channels) - 22.).abs() < 0.01
-    );
+    assert!((remya_sound::volume_percent(&observed.preferences.channels) - 22.).abs() < 0.01);
 }

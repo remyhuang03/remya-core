@@ -87,7 +87,7 @@ impl<B: Backend> Cameras<B> {
             cameras: cameras.clone(),
         })
         .map_err(|e| e.to_string())?;
-        remya_settings_display::atomic_write(&self.path, text.as_bytes())?;
+        remya_display::atomic_write(&self.path, text.as_bytes())?;
         self.saved = cameras;
         self.initialized = true;
         Ok(())
@@ -128,7 +128,7 @@ impl<B: Backend> Cameras<B> {
                 }
             }
         }
-        if saved != before || !self.path.exists() {
+        if self.path.try_exists().map_err(|e| e.to_string())? && saved != before {
             self.save(saved)?;
         } else {
             self.saved = saved;
@@ -141,6 +141,15 @@ impl<B: Backend> Cameras<B> {
         self.error = result.as_ref().err().cloned();
         result
     }
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.path.try_exists().map_err(|e| e.to_string())? {
+            self.save(self.saved.clone())?;
+        }
+        Ok(())
+    }
+
     fn conflicts(&self, camera: &Camera) -> bool {
         camera.controls.iter().any(|(field, c)| {
             self.saved
@@ -272,9 +281,7 @@ impl<B: Backend> Cameras<B> {
 }
 
 #[cfg(feature = "preview")]
-pub mod api;
-#[cfg(feature = "preview")]
-mod frb_generated;
+pub mod preview;
 
 #[cfg(test)]
 mod tests {
@@ -342,6 +349,7 @@ mod tests {
     fn initializes_without_writes_and_resolves_both_ways() {
         let (_dir, mut m) = setup();
         m.refresh().unwrap();
+        m.manage().unwrap();
         assert_eq!(m.backend.writes, 0);
         m.backend.cameras[0]
             .controls
@@ -385,6 +393,7 @@ mod tests {
     fn readback_detection_and_persistence_failures_preserve_saved_values() {
         let (dir, mut m) = setup();
         m.refresh().unwrap();
+        m.manage().unwrap();
         let original = fs::read(&m.path).unwrap();
         m.backend.ignore_write = true;
         assert!(
@@ -415,6 +424,7 @@ mod tests {
     fn unplugged_devices_keep_saved_preferences() {
         let (_dir, mut m) = setup();
         m.refresh().unwrap();
+        m.manage().unwrap();
         m.backend.cameras.clear();
         m.refresh().unwrap();
         assert_eq!(m.saved["camera"]["brightness"], 2.);

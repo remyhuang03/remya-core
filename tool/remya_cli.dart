@@ -2,16 +2,14 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:dbus/dbus.dart';
-import 'package:remya_settings_client/settings_contract.dart';
+import 'package:remya_client/settings_contract.dart';
 
-const usage = '''Usage: remya_settings <command> [arguments]
+const usage = '''Usage: remya <command> [arguments]
   get <theme|system|system-information|hostname|display|display-brightness|background|accent|fonts|startup|startup-candidates:query|network|proxy|airplane|bluetooth|sound|power|battery-saver|battery-history:json|cameras|account-information|updates|storage|printers|cleanup|font-search:query|font:family|catalog|about|page:id|setting-id>  Read state or metadata
-  get remya-bar.clock-seconds        Read the bar clock preference
-  get remya-bar.osd                  Read bar OSD step and minimum gamma preferences
-  get remya-bar.folded-apps           List folded app tray IDs
-  get remya-bar.layout                Read bar pill groups and options
-  get notifications                   Read notification and Do Not Disturb preferences
+  manage <feature>                   Start managing the current system snapshot
   set <setting-id> <value|->           Apply an available setting; - reads the value from stdin
+  replace <setting-id> <json|-> <revision>  Save an app preference if unchanged
+  open-app <app> [page]              Open registered application settings
   install-appimage <path>            Install an AppImage and show its progress in Settings
   list                               List all controls and availability
   search <query>                     Search settings pages
@@ -21,8 +19,8 @@ const usage = '''Usage: remya_settings <command> [arguments]
   reload                             Reload configuration and system state
   watch [theme|all]                   Stream changes as JSON lines
   restart                            Restart the system (save work first)
-  close                              Close the GUI and keep Settings resident
-  quit                               Stop the settings application/service
+  close                              Close the GUI and keep Core resident
+  quit                               Stop the Core service
   --help                             Show this help
 
 All successful commands print JSON. Writes use the same backend as the GUI.
@@ -40,13 +38,17 @@ Future<void> main(List<String> arguments) async {
     if (command == 'list') {
       if (args.isNotEmpty) throw ArgumentError('list takes no arguments');
       final controls = <dynamic>[];
+      List<dynamic> apps = const [];
       String? cursor = '0';
       while (cursor != null) {
         final page = await client.call('List', [cursor]);
         controls.addAll(page['controls'] as List);
+        apps = page['apps'] as List;
         cursor = page['next_cursor'] as String?;
       }
-      stdout.writeln(jsonEncode({'api_version': 1, 'controls': controls}));
+      stdout.writeln(
+        jsonEncode({'api_version': 1, 'controls': controls, 'apps': apps}),
+      );
       return;
     }
     if (command == 'watch') {
@@ -77,7 +79,10 @@ Future<void> main(List<String> arguments) async {
     }
     const methods = {
       'get': 'Get',
+      'manage': 'Manage',
       'set': 'Set',
+      'replace': 'Replace',
+      'open-app': 'OpenApp',
       'list': 'List',
       'search': 'Search',
       'open': 'Open',
@@ -92,8 +97,16 @@ Future<void> main(List<String> arguments) async {
     // Passwords stay out of the process list by arriving on stdin.
     final values = command == 'open' && args.isEmpty
         ? ['home']
-        : command == 'set' && args.length == 2 && args[1] == '-'
-        ? [args[0], (await utf8.decoder.bind(stdin).join()).trim()]
+        : command == 'open-app' && args.length == 1
+        ? [args[0], '']
+        : ((command == 'set' && args.length == 2) ||
+                  (command == 'replace' && args.length == 3)) &&
+              args[1] == '-'
+        ? [
+            args[0],
+            (await utf8.decoder.bind(stdin).join()).trim(),
+            ...args.skip(2),
+          ]
         : args;
     stdout.writeln(jsonEncode(await client.call(method, values)));
   } catch (error) {

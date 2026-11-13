@@ -1,15 +1,14 @@
 mod ai;
-mod clipboard;
 mod events;
-mod notifications;
-mod osd;
+mod paths;
 mod privileged;
+mod requests;
 mod state;
 use gio::glib::{self, variant::ToVariant};
 use std::sync::{Arc, Mutex};
-const NAME: &str = "top.remya.settings.Service1";
-const PATH: &str = "/top/remya/settings";
-const INTERFACE: &str = "top.remya.settings.Settings1";
+const NAME: &str = "top.remya.Core1";
+const PATH: &str = "/top/remya/Core1";
+const INTERFACE: &str = "top.remya.Core1";
 fn signal(bus: &gio::DBusConnection, topic: &str, value: &serde_json::Value) {
     let _ = bus.emit_signal(
         None,
@@ -18,6 +17,13 @@ fn signal(bus: &gio::DBusConnection, topic: &str, value: &serde_json::Value) {
         "Changed",
         Some(&(topic, value.to_string()).to_variant()),
     );
+}
+fn return_error(invocation: gio::DBusMethodInvocation, error: &str) {
+    let (kind, message) = error
+        .split_once(':')
+        .filter(|(k, _)| ["InvalidArgument", "Unavailable"].contains(k))
+        .unwrap_or(("OperationFailed", error));
+    invocation.return_dbus_error(&format!("{INTERFACE}.{kind}"), message);
 }
 fn main() {
     if let Err(e) = run() {
@@ -31,27 +37,17 @@ fn run() -> Result<(), String> {
     }
     let bus = gio::bus_get_sync(gio::BusType::Session, gio::Cancellable::NONE)
         .map_err(|e| e.to_string())?;
-    let config = if let Some(root) = std::env::args().skip_while(|a| a != "--debug-root").nth(1) {
-        std::path::PathBuf::from(root).join("config/config.local.toml")
-    } else {
-        std::env::var_os("XDG_CONFIG_HOME")
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.is_absolute())
-            .or_else(|| {
-                std::env::var_os("HOME")
-                    .map(std::path::PathBuf::from)
-                    .filter(|p| p.is_absolute())
-                    .map(|p| p.join(".config"))
-            })
-            .ok_or("Absolute HOME required")?
-            .join("remya/settings/config.toml")
-    };
-    let initial = state::State::new(config);
+    let debug = std::env::args()
+        .skip_while(|a| a != "--debug-root")
+        .nth(1)
+        .map(Into::into);
+    let initial = state::State::new(paths::Roots::detect(debug)?);
+    let requests = initial.requests.clone();
     let appimages = initial.appimages.clone();
     let storage = initial.storage.clone();
     let bluetooth = initial.bluetooth.clone();
     let state = Arc::new(Mutex::new(initial));
-    let xml = include_str!("../../../../../packages/remya_settings_client/api/settings1.xml");
+    let xml = include_str!("../../../packages/remya_client/api/core1.xml");
     let info = gio::DBusNodeInfo::for_xml(xml)
         .map_err(|e| e.to_string())?
         .lookup_interface(INTERFACE)
@@ -66,9 +62,39 @@ fn run() -> Result<(), String> {
                 .map(|i| args.child_value(i).get::<String>().unwrap())
                 .collect::<Vec<_>>();
             let state = handler.clone();
+            let requests = requests.clone();
             let quit = quit.clone();
             let method = method.to_owned();
             glib::MainContext::default().spawn_local(async move {
+                let worker = state.clone();
+                let work_method = method.clone();
+                let work_args = args.clone();
+                if let Some(result) =
+                    gio::spawn_blocking(move || requests.execute(&worker, &work_method, &work_args))
+                        .await
+                        .expect("independent request worker panicked")
+                {
+                    match result {
+                        Ok(value) => {
+                            invocation.return_value(Some(&(value.to_string(),).to_variant()));
+                            if ["Set", "Replace"].contains(&method.as_str()) {
+                                if args[0] != remya_applications::UNINSTALL {
+                                    signal(&bus, &args[0], &value);
+                                }
+                                if ai::SET_IDS.contains(&args[0].as_str())
+                                    && args[0] != ai::PROVIDERS
+                                {
+                                    signal(&bus, ai::PROVIDERS, &value);
+                                }
+                                if args[0] == remya_applications::UNINSTALL {
+                                    signal(&bus, "installed-apps", &serde_json::json!({}));
+                                }
+                            }
+                        }
+                        Err(error) => return_error(invocation, &error),
+                    }
+                    return;
+                }
                 let worker = state.clone();
                 let work_method = method.clone();
                 let work_args = args.clone();
@@ -128,55 +154,30 @@ fn run() -> Result<(), String> {
                     Ok(value) => {
                         invocation.return_value(Some(&(value.to_string(),).to_variant()));
                         if method == "Set"
-                            && ([
-                                state::BAR_CLOCK_SECONDS,
-                                state::BAR_KEY_PREVIEW,
-                                state::BAR_FOLDED_APPS,
-                                state::BAR_SIDEBAR,
-                                state::BAR_LAYOUT,
-                                remya_settings_power::KEEP_AWAKE,
-                                remya_settings_display::night_light::GAMMA,
-                            ]
-                            .contains(&args[0].as_str())
-                                || notifications::IDS.contains(&args[0].as_str())
-                                || osd::IDS.contains(&args[0].as_str())
-                                || clipboard::IDS.contains(&args[0].as_str())
-                                || remya_settings_network::proxy::IDS.contains(&args[0].as_str())
+                            && ([remya_power::KEEP_AWAKE, remya_display::night_light::GAMMA]
+                                .contains(&args[0].as_str())
+                                || remya_network::proxy::IDS.contains(&args[0].as_str())
                                 || [
-                                    remya_settings_network::airplane::ENABLED,
-                                    remya_settings_network::airplane::WIFI,
+                                    remya_network::airplane::ENABLED,
+                                    remya_network::airplane::WIFI,
                                 ]
                                 .contains(&args[0].as_str()))
                         {
                             signal(&bus, &args[0], &value);
                         }
                         if method == "Set"
-                            && (args[0] == remya_settings_display::manager::BRIGHTNESS
+                            && (args[0] == remya_display::manager::BRIGHTNESS
                                 || args[0].starts_with("display-brightness:"))
                         {
                             signal(&bus, "display-brightness", &value);
                         }
-                        if method == "Set"
-                            && remya_settings_printers::IDS.contains(&args[0].as_str())
-                        {
+                        if method == "Set" && remya_printers::IDS.contains(&args[0].as_str()) {
                             signal(&bus, "printers", &value);
                         }
-                        if method == "Set" && ai::SET_IDS.contains(&args[0].as_str()) {
-                            signal(&bus, &args[0], &value);
-                            if args[0] != ai::PROVIDERS {
-                                signal(&bus, ai::PROVIDERS, &value);
-                            }
-                        }
                     }
-                    Err(error) => {
-                        let (kind, message) = error
-                            .split_once(':')
-                            .filter(|(k, _)| ["InvalidArgument", "Unavailable"].contains(k))
-                            .unwrap_or(("OperationFailed", &error));
-                        invocation.return_dbus_error(&format!("{INTERFACE}.{kind}"), message);
-                    }
+                    Err(error) => return_error(invocation, &error),
                 }
-                if method == "Set" || method == "Resolve" || method == "Reload" {
+                if ["Set", "Resolve", "Manage", "Reload"].contains(&method.as_str()) {
                     if theme_changed {
                         signal(&bus, "theme", &theme);
                     }
@@ -185,8 +186,7 @@ fn run() -> Result<(), String> {
                     signal(&bus, "hostname", &hostname);
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == "night-light"
-                                || remya_settings_display::is_night_light_setting(id)
+                            id == "night-light" || remya_display::is_night_light_setting(id)
                         })
                     {
                         let night_light = state.lock().unwrap().night_light.state();
@@ -194,7 +194,7 @@ fn run() -> Result<(), String> {
                     }
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == "network" || remya_settings_network::is_network_setting(id)
+                            id == "network" || remya_network::is_network_setting(id)
                         })
                     {
                         let network = state.lock().unwrap().network.state();
@@ -209,7 +209,7 @@ fn run() -> Result<(), String> {
                     }
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == "startup" || remya_settings_startup::IDS.contains(&id.as_str())
+                            id == "startup" || remya_startup::IDS.contains(&id.as_str())
                         })
                     {
                         signal(&bus, "startup", &state.lock().unwrap().startup.state());
@@ -222,7 +222,7 @@ fn run() -> Result<(), String> {
                         signal(&bus, "installed-apps", &serde_json::json!({}));
                     }
                     if args.first().is_some_and(|id| {
-                        remya_settings_system_information::account::IDS.contains(&id.as_str())
+                        remya_system_information::account::IDS.contains(&id.as_str())
                     }) && let Ok(account) = state.lock().unwrap().account.read()
                     {
                         signal(&bus, "account-information", &account);
@@ -230,36 +230,35 @@ fn run() -> Result<(), String> {
                     if method == "Reload"
                         || args
                             .first()
-                            .is_some_and(|id| id == "input" || remya_settings_input::is_setting(id))
+                            .is_some_and(|id| id == "input" || remya_input::is_setting(id))
                     {
                         signal(&bus, "input", &state.lock().unwrap().input.state());
                     }
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == remya_settings_date_time::language::FEATURE
-                                || remya_settings_date_time::language::is_setting(id)
+                            id == remya_date_time::language::FEATURE
+                                || remya_date_time::language::is_setting(id)
                         })
                     {
                         signal(&bus, "language", &state.lock().unwrap().language.state());
                     }
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == "desktop" || remya_settings_input::is_desktop_setting(id)
+                            id == "desktop" || remya_input::is_desktop_setting(id)
                         })
                     {
                         signal(&bus, "desktop", &state.lock().unwrap().desktop.state());
                     }
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == "themes" || remya_settings_appearance::packs::is_setting(id)
+                            id == "themes" || remya_appearance::packs::is_setting(id)
                         })
                     {
                         signal(&bus, "themes", &state.lock().unwrap().themes.state());
                     }
                     if method == "Reload"
                         || args.first().is_some_and(|id| {
-                            id == "text-size"
-                                || remya_settings_appearance::text_size::is_setting(id)
+                            id == "text-size" || remya_appearance::text_size::is_setting(id)
                         })
                     {
                         signal(&bus, "text-size", &state.lock().unwrap().text_size.state());
@@ -268,8 +267,7 @@ fn run() -> Result<(), String> {
                         || args.first().is_some_and(|id| {
                             id == "power"
                                 || id == "battery-saver"
-                                || (id != remya_settings_power::KEEP_AWAKE
-                                    && remya_settings_power::is_setting(id))
+                                || (id != remya_power::KEEP_AWAKE && remya_power::is_setting(id))
                         })
                     {
                         signal(&bus, "power", &state.lock().unwrap().power.state());
@@ -277,7 +275,7 @@ fn run() -> Result<(), String> {
                     if method == "Reload"
                         || args
                             .first()
-                            .is_some_and(|id| id == "sound" || remya_settings_sound::is_setting(id))
+                            .is_some_and(|id| id == "sound" || remya_sound::is_setting(id))
                     {
                         signal(&bus, "sound", &state.lock().unwrap().sound.state());
                     }
@@ -285,20 +283,17 @@ fn run() -> Result<(), String> {
                         || args.first().is_some_and(|id| {
                             id == "cameras"
                                 || id.starts_with("cameras:")
-                                || remya_settings_camera::is_setting(id)
+                                || remya_camera::is_setting(id)
                         })
                     {
                         signal(&bus, "cameras", &state.lock().unwrap().cameras.state());
                     }
-                    if args
-                        .first()
-                        .is_some_and(|id| remya_settings_updates::is_setting(id))
-                    {
+                    if args.first().is_some_and(|id| remya_updates::is_setting(id)) {
                         signal(&bus, "updates", &state.lock().unwrap().updates.state());
                     }
                     if args
                         .first()
-                        .is_some_and(|id| remya_settings_fonts::IDS.contains(&id.as_str()))
+                        .is_some_and(|id| remya_fonts::IDS.contains(&id.as_str()))
                     {
                         signal(&bus, "fonts", &serde_json::json!({}));
                     }
@@ -386,7 +381,9 @@ fn run() -> Result<(), String> {
             signal(&poll_bus, "bluetooth", &bluetooth.state());
         }
         if let Ok(state) = polling.try_lock() {
-            state.updates.tick();
+            if !state.uninstalling {
+                state.updates.tick();
+            }
             if state.updates.take_dirty() {
                 signal(&poll_bus, "updates", &state.updates.state());
             }

@@ -2,11 +2,8 @@ import 'dart:convert';
 
 import 'dbus_client.dart';
 
-/// Visible providers, the addable catalog and the Bar preferences.
+/// Visible providers and the addable catalog.
 const aiProvidersSettingId = 'ai.providers';
-
-/// Bar quota preferences: `{pinned, lowPercent, showUsed, ringOrder}`.
-const aiBarSettingId = 'ai.bar';
 
 const _aiProviderPrefix = 'ai.provider/';
 const _aiCredentialSettingId = 'ai.credential';
@@ -24,9 +21,6 @@ extension AiClient on SettingsClient {
   Future<Map<String, dynamic>> readAi() =>
       _value('Get', [aiProvidersSettingId]);
 
-  /// `{pinned, lowPercent, showUsed, ringOrder}` without probing providers; cheap enough to poll.
-  Future<Map<String, dynamic>> readAiBar() => _value('Get', [aiBarSettingId]);
-
   /// `{provider, usage, modelsDev: {status, provider, models}}`.
   Future<Map<String, dynamic>> readAiProvider(String id) =>
       _value('Get', ['$_aiProviderPrefix$id']);
@@ -39,18 +33,6 @@ extension AiClient on SettingsClient {
     'id': id,
     'enabled': ?enabled,
     'source': ?source,
-  });
-
-  Future<Map<String, dynamic>> setAiBar({
-    List<String>? pinned,
-    int? lowPercent,
-    bool? showUsed,
-    String? ringOrder,
-  }) => _set(aiBarSettingId, {
-    'pinned': ?pinned,
-    'lowPercent': ?lowPercent,
-    'showUsed': ?showUsed,
-    'ringOrder': ?ringOrder,
   });
 
   /// Exactly one of [apiKey], [cookie] or [clear]. The secret travels to the

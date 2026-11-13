@@ -1,25 +1,15 @@
-# Remya Settings client
+# Remya Core client
 
-Public integration boundary for independently built Remya applications. The
-Settings application owns this package and is the only configuration/system
-writer. See [the complete API contract](../../docs/public-api.md).
+Pure Dart D-Bus contracts for independent Remya clients, without Flutter.
+Import `package:remya_client/remya_client.dart` (or `settings_contract.dart`).
+`SettingsClient.manage(feature)` opts a system feature into persistence and
+returns its Get payload; `call` exposes the complete Core1 method set.
 
-- `settings_contract.dart`: pure Dart D-Bus client, versioned theme configuration,
-  settings opener, and XDG path resolution. The standalone CLI uses this entrypoint.
-- `remya_settings_client.dart`: the same contract plus shared Material 3 Expressive
-  theme construction and the observable theme controller for Flutter clients.
+The canonical interface is `api/core1.xml`. See the repository
+[public API](../../docs/public-api.md) and [XDG layout](../../docs/xdg-layout.md).
+The daemon, CLI and Settings GUI are built independently. Flutter theme adapters and provider icon assets live in `../remya_ui`.
 
-Use `SettingsClient.call` for application operations and `watch` for an initial
-snapshot followed by updates. Use `SettingsThemeController.service()` for a
-release Flutter application and dispose the controller when its application view
-is released. Repository-based theme overrides are read-only debug helpers.
+`openRemyaSettings(debugExecutable: ..., page: ...)` starts the selected GUI
+with `--gui <page>`; release calls use Core Open over D-Bus.
 
-Do not add Settings pages, its system backend, private controllers, or native FFI
-to this package. Add new contracts beside their owning feature and extend the
-common operation dispatcher and parity tests in the Settings application. Pin a
-version/tag before releasing clients independently; interface-incompatible changes
-need a new D-Bus version.
-
-Licensed under PolyForm Noncommercial License 1.0.0; see LICENSE. The `dbus`
-dependency uses MPL-2.0 and is used unmodified; preserve its notices. Its
-[source release](https://pub.dev/packages/dbus/versions/0.8.0) is publicly available. Flutter's license registry includes its Dart dependency notice.
+Validate with `fvm dart pub get` and `fvm dart analyze`.

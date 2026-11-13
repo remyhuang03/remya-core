@@ -3,7 +3,7 @@
 use crate::system_theme::{AppearancePlan, Context, setting_change};
 use gio::glib::variant::ToVariant;
 use gio::prelude::*;
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
@@ -82,10 +82,9 @@ impl TextSize {
                     .map_err(|e| format!("{}: {e}", self.saved_path.display()))?
                     .text_scaling_factor,
             ),
-            // First use saves what the system uses now and changes nothing.
+            // Until managed, the snapshot follows the live system.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let system = system.clone()?;
-                self.save(system)?;
                 Some(system)
             }
             Err(e) => return Err(format!("{}: {e}", self.saved_path.display())),
@@ -101,6 +100,15 @@ impl TextSize {
 
     pub fn refresh(&mut self) -> Result<(), String> {
         self.refresh_with(Context::current().as_ref())
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.saved_path.try_exists().map_err(|e| e.to_string())? {
+            self.save(self.saved.ok_or("System text size cannot be detected")?)?;
+        }
+        Ok(())
     }
 
     fn save(&self, scale: f64) -> Result<(), String> {
@@ -183,6 +191,7 @@ impl TextSize {
                     self.error = Some(error.clone());
                     return Err(error);
                 }
+                self.save(saved)?;
             }
             _ => return Err("InvalidArgument:Unknown resolution".into()),
         }
@@ -209,10 +218,10 @@ mod tests {
         let mut text = TextSize::new(path.clone());
         let ctx = Ok(&context);
 
-        // First use saves the system value and writes nothing.
+        // Unmanaged reads follow the system without writing a snapshot.
         text.refresh_with(ctx).unwrap();
         assert_eq!(text.state()["options"][SCALE], 1.25);
-        assert!(fs::read_to_string(&path).unwrap().contains("1.25"));
+        assert!(!path.exists());
 
         text.set_with(ctx, "1.5").unwrap();
         assert_eq!(gnome.double(KEY), 1.5);

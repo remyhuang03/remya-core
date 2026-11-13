@@ -1,5 +1,5 @@
 [package]
-name = "remya_settings_applications"
+name = "remya_applications"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true

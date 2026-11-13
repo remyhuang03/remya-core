@@ -1,5 +1,5 @@
 [package]
-name = "remya_settings_system_information"
+name = "remya_system_information"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }
 serde_json = "1"
-remya_settings_date_time = { path = "../date_time", default-features = false }
+remya_date_time = { path = "../date_time" }
 gio = { version = "0.21.5", features = ["v2_84"] }
 gdk-pixbuf = "0.21.5"
 serde = { version = "1", features = ["derive"] }

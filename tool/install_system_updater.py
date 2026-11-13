@@ -2,9 +2,9 @@
 """Install the root-owned system updater and its polkit rule. Run once with sudo.
 
 The rule lets the invoking user run only the fixed repository upgrade
-(`remya-settings-update upgrade [--include-held]`) without a password, so the
+(`remya-core-update upgrade [--include-held]`) without a password, so the
 resident Settings service can run manual and daily updates unattended.
-Remove with: sudo rm /usr/local/libexec/remya-settings-update /etc/polkit-1/rules.d/50-top.remya.settings.update.rules
+Remove with: sudo rm /usr/local/libexec/remya-core-update /etc/polkit-1/rules.d/50-top.remya.core.update.rules
 """
 import os
 from pathlib import Path
@@ -12,9 +12,9 @@ import pwd
 import re
 import tempfile
 
-UPDATER = Path("/usr/local/libexec/remya-settings-update")
-RULE = Path("/etc/polkit-1/rules.d/50-top.remya.settings.update.rules")
-MARKER = "// Installed by remya_settings tool/install_system_updater.py"
+UPDATER = Path("/usr/local/libexec/remya-core-update")
+RULE = Path("/etc/polkit-1/rules.d/50-top.remya.core.update.rules")
+MARKER = "// Installed by remya_core tool/install_system_updater.py"
 
 
 def rule(user):
@@ -60,9 +60,9 @@ def main(root, environment):
     if not user or user == "root":
         raise SystemExit("Run with sudo from the ordinary account that uses Settings")
     pwd.getpwnam(user)
-    source = root / "build/linux/x64/release/bundle/libexec/remya-settings-update"
+    source = root / "target/release/remya-core-update"
     if not source.is_file():
-        raise SystemExit("Run fvm flutter build linux --release first")
+        raise SystemExit("Run cargo build --release -p remya_updates first")
     if RULE.exists() and MARKER not in RULE.read_text():
         raise SystemExit(f"Refusing to replace unrelated polkit rule: {RULE}")
     text = rule(user)

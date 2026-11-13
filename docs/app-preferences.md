@@ -1,35 +1,18 @@
-# Appearance configuration and backend
+# Shared appearance preferences
 
-Colors and themes contains the system Light/Dark selector, the accent color, and the application palette selector. There is no Follow system option. Remy'a Settings immediately uses the selected mode, accent and Material palette. The accent is stored separately in `accent.toml`; see [public interfaces](public-api.md#accent-color).
+Core owns shared `theme.toml` and `accent.toml`; the Settings GUI and other Remya
+apps consume the public API. See [XDG layout](xdg-layout.md) for roots and
+[public API](public-api.md) for Get/Set, Manage and conflict handling.
 
-Appearance → Remy'a Bar contains Show seconds, enabled by default. The Settings
-service saves this app preference and publishes changes to running bars. See
-[the clock preference API](public-api.md#remya-bar-appearance).
-Notifications, Automatic Do Not Disturb and Priority notification hold the
-preferences of the bar's notification service; see
-[notifications](public-api.md#notifications).
+`crates/appearance` contains system detection and application, atomic file updates,
+and toolkit environment coordination. `crates/service` owns the shared preference
+file and serialization. `packages/remya_client` supplies pure Dart contracts;
+shared Flutter theme and identity adapters live in `packages/remya_ui`. Settings pages remain in the GUI repo.
 
-## Configuration ownership
+## Shared theme TOML
 
-| Data | Owner | Storage |
-| --- | --- | --- |
-| Material palette and last selected mode | Typed Dart preferences/controller | Application TOML below |
-| GNOME/libadwaita color preference | Rust appearance crate, GIO | `org.gnome.desktop.interface` GSettings |
-| Installed GTK toolkit preferences | Rust appearance crate | `$XDG_CONFIG_HOME/gtk-{3,4}.0/settings.ini` |
-| Documented Qt Quick theme defaults | Rust appearance crate | Managed blocks in fish and Hyprland configuration |
-| UI-only catalog controls | Catalog renderer | No persistence or host access |
-
-The Rust feature crate is `lib/src/rust/appearance/`; the core crate stays empty. Its handwritten API is `src/api.rs`, system coordination is `src/system_theme.rs`, atomic file updates are `src/files.rs`, and toolkit environment configuration is `src/environment.rs`. `flutter_rust_bridge` 2.13.0 connects this feature to Flutter. Generated Dart bindings live in `lib/src/rust/appearance_bridge/`; regenerate with the matching generator and `flutter_rust_bridge.yaml`, never edit generated files. Linux CMake builds and bundles the Rust shared library. GIO/GLib remain dynamically linked system dependencies.
-
-## Application TOML
-
-| Build | File |
-| --- | --- |
-| Debug | `config/config.local.toml` below the native-reported repository root, independent of launch cwd |
-| Profile/release | `$XDG_CONFIG_HOME/remya/settings/config.toml` |
-| Profile/release fallback | `$HOME/.config/remya/settings/config.toml` when XDG_CONFIG_HOME is missing or relative |
-
-An absolute HOME or XDG_CONFIG_HOME is required. Debug mode isolates only the application's TOML: explicitly selecting Light/Dark still changes real desktop appearance. Tests inject an isolated backend or configuration root.
+Release uses `$XDG_CONFIG_HOME/remya/shared/theme.toml`, with absolute HOME fallback.
+`--debug-root <repo>` selects `<repo>/config/shared/theme.toml`.
 
 ```toml
 version = 1
@@ -39,65 +22,86 @@ style_variant = "tonal_spot"
 theme_mode = "light"
 ```
 
-- `style_variant`: `tonal_spot`, `fidelity`, `monochrome`, `neutral`, `vibrant`, `expressive`, `content`, `rainbow`, or `fruit_salad`. These change the Material color scheme; widgets retain Material Design 3 Expressive styling.
-- `theme_mode`: last selected `light` or `dark`. First launch reads the current GNOME/GTK preference and atomically saves it. Startup and Reload subsequently compare saved and actual values without overwriting either side; a top warning offers adoption or application. Editing TOML never changes the desktop. A previous preview file containing `system` is accepted as migration input and saved as an explicit mode on the next successful edit.
-- Missing fields use Tonal spot/Light defaults. Existing explicit style selections are retained. Missing files do not trigger a write. Empty files, malformed TOML, unsupported versions, unknown keys, wrong types, and unknown enum values are rejected.
-- `seed_color` is not part of this file, and no automatic startup writes are included. The public service observes external configuration changes every 500 ms and reloads through the same controller. Invalid files retain the last valid live theme and produce an API/UI error. Removing a file and reloading retains the last valid live state.
+Styles are `tonal_spot`, `fidelity`, `monochrome`, `neutral`, `vibrant`, `expressive`,
+`content`, `rainbow`, and `fruit_salad`. Theme mode is `light` or `dark`.
+Absent fields have Tonal spot/Light defaults; a missing file may initialize from
+the detected system mode because it is a Remya-owned shared preference.
+`accent.toml` holds the Material seed separately, keeping the theme schema unchanged.
 
-`lib/features/appearance/` keeps the immutable model, file store, serialized controller, and Rust adapter together. `main.dart` initializes the bridge and reads state before startup. `app.dart` owns the controller, distributes it through an inherited notifier, and rebuilds both Material themes. Busy controls are disabled; failures appear in an English error banner with Reload. Navigation is retained across theme changes.
+Invalid files retain the last valid in-memory theme and remain on disk for repair.
+Writes use atomic replacement and preserve existing links and permissions.
+An explicit mode Set updates supported desktop targets with readback; if application
+fails, the service restores the previous theme record and returns the error.
+Editing the theme record itself never applies desktop settings.
 
-## Supported system targets
+## System targets
 
-| Target | Explicit interface | Behavior |
-| --- | --- | --- |
-| GNOME / libadwaita | `org.gnome.desktop.interface color-scheme` | `prefer-light` / `prefer-dark`, only when the schema/key exists |
-| GTK 3 | `[Settings] gtk-application-prefer-dark-theme` | `0` / `1`; GTK 3 is also the native runner's toolkit |
-| GTK 4.20+ | `[Settings] gtk-interface-color-scheme` | `light` / `dark`; removes the obsolete GTK 4 prefer-dark key |
-| Existing GTK theme | GNOME `gtk-theme` and existing `gtk-theme-name` | Switch only matching installed light/dark variants; retain themes without a matching variant |
-| Qt Quick Material | `QT_QUICK_CONTROLS_MATERIAL_THEME` | `Light` / `Dark`, only when the Qt 6 style module is installed |
-| Qt Quick Universal | `QT_QUICK_CONTROLS_UNIVERSAL_THEME` | `Light` / `Dark`, only when the Qt 6 style module is installed |
+GNOME uses the interface GSettings color scheme. GTK 3 uses its dark-theme key;
+GTK 4 uses `gtk-interface-color-scheme`. Existing light/dark theme variants are
+selected only when installed. Qt Quick Material and Universal defaults use
+validated environment blocks in fish and Hyprland when those styles are installed.
+Other Qt styles and portal availability retain their existing platform behavior.
 
-Target current Arch Linux packages. No deprecated GTK 4 fallback or old Hyprland syntax is implemented. Toolkit and schema detection do not install packages. The settings page offers Light and Dark icon buttons with selection states, tooltips, and keyboard focus. Selecting either mode applies supported toolkit settings automatically through Rust. Backend target results remain internal; the page does not show toolkit/environment diagnostics or a routine reload button. Failures still appear in the error banner with Reload.
+Environment blocks preserve unrelated content, reject duplicate/incomplete markers,
+and undergo syntax validation before application. Appearance updates use a
+cross-process lock under `remya/shared/`. Debug preference roots do not isolate
+explicit host appearance writes; tests use injected temporary contexts.
 
-Qt defaults apply only to applications using those styles; explicit QML properties take precedence. The backend does not set `QT_QUICK_CONTROLS_STYLE`, `QT_QPA_PLATFORMTHEME`, `QT_STYLE_OVERRIDE`, or `GTK_THEME`, replace a palette file, or guess Kvantum/qt6ct/KDE theme names. Qt Widgets and other applications can consume the system preference through their existing platform integration. The desktop portal appearance interface is read-only: availability and propagation depend on the installed portal backend, so the app does not claim universal application coverage.
+## Application-owned preferences
 
-Sources: [Qt supported environment variables](https://doc.qt.io/qt-6/qtquickcontrols-environment.html), [GTK 3 preference](https://docs.gtk.org/gtk3/property.Settings.gtk-application-prefer-dark-theme.html), [GTK 4 interface preference](https://docs.gtk.org/gtk4/property.Settings.gtk-interface-color-scheme.html), [portal Settings](https://flatpak.github.io/xdg-desktop-portal/docs/doc-org.freedesktop.portal.Settings.html), and [Qt color-scheme platform behavior](https://doc.qt.io/qt-6/qstylehints.html#colorScheme-prop).
+Each application installs `remya/apps/<id>.json` under an absolute XDG data root.
+Lookup order is `$XDG_DATA_HOME` (or `$HOME/.local/share`), then `$XDG_DATA_DIRS`
+(default `/usr/local/share:/usr/share`). Relative entries are ignored. The first
+filename for an id wins, even if invalid; it does not fall through to a lower
+priority registration. The filename stem must match the registration id.
 
-## fish and Hyprland environments
+```json
+{
+  "version": 1,
+  "id": "remya-bar",
+  "app": "top.remya.bar",
+  "title": "Remya Bar",
+  "icon": "top.remya.bar",
+  "config": "bar",
+  "pages": [{"id": "layout", "title": "Layout", "keywords": ["pill", "modules"]}],
+  "settings": {
+    "layout": {
+      "title": "Bar layout", "page": "layout", "keywords": [],
+      "default": {"size": 2},
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"size": {"type": "integer", "minimum": 1}},
+        "required": ["size"], "additionalProperties": false
+      }
+    }
+  }
+}
+```
 
-The default shell is fish. The Rust backend maintains clearly delimited `Remy'a Settings appearance` blocks at the end of `$XDG_CONFIG_HOME/fish/config.fish` and the active Hyprland Lua entrypoint (`$HYPRLAND_CONFIG`, otherwise `$XDG_CONFIG_HOME/hypr/hyprland.lua`). The fish block uses `set -gx`; the Lua block uses `hl.env`. Existing content outside these blocks is retained byte for byte. Future edits replace the same block instead of adding duplicates. Incomplete or duplicate markers abort the operation.
+All shown fields are required. Unknown registration, page and setting fields
+reject the whole file. App ids are `[a-z0-9]+(-[a-z0-9]+)*` with at most 64 ASCII
+characters; page ids and setting keys use the same grammar without the length
+limit. Page ids must be unique and each setting must reference a declared page.
+Desktop ids omit `.desktop` and contain only ASCII letters, digits, dots,
+underscores and hyphens. Titles and icon names must be nonempty; icons are names,
+not paths. Config names use `[a-z0-9-]+`, excluding `system`, `shared`, `core` and
+`settings`. Catalog page/setting prefixes are reserved. Duplicate config names
+are rejected after the first accepted registration (XDG order, sorted filenames
+within a root). A mismatched/duplicate registration id is rejected rather than
+claiming another filename's namespace. Errors remain visible in List apps.
 
-fish must be installed; its configuration may be created. Hyprland's entrypoint must already exist and `luac` must be available for syntax validation, otherwise that target is reported as skipped. The complete proposed configuration is syntax-checked without executing it (`fish --no-config --no-execute`, `luac -p -`) before any system changes. No Bash/Zsh profiles, `/etc/environment`, systemd environment files, or universal fish variables are modified.
+Schemas are meta-validated against draft 2020-12, compiled once per registration
+load, and checked against their defaults. `$schema`, when provided, must identify
+2020-12. The `jsonschema` crate has default features disabled: registration loading
+does not fetch HTTP or filesystem schema references. Bundle schemas and local
+`$defs`/`$ref` in the registration. Defaults and submitted values must also be
+TOML-representable; nested nulls are rejected even when the schema permits them.
 
-Environment changes affect newly started fish processes and the next Hyprland session. Existing processes keep their inherited environment; the app does not restart the compositor, shell, or other applications. Application launch wrappers and explicit application overrides may still take precedence.
-
-Sources: [fish configuration](https://fishshell.com/docs/current/language.html#configuration-files) and [Hyprland environment variables](https://wiki.hypr.land/configuring/core/environment-variables/).
-
-## Validation, persistence, and failures
-
-- App TOML writes use a flushed sibling temporary file followed by rename. Existing symlinks and permission bits are retained; new files use `0600`. Invalid existing data is never silently overwritten. Successful saves normalize TOML and do not preserve comments.
-- Rust acquires a per-user appearance lock, then preflights all target files and GSettings writability/ranges before changing any appearance setting. Files use flushed atomic replacement and independent readback; comments, line endings, unrelated keys, symlinks, and permissions are preserved. Changed file baselines abort rather than overwrite an external edit.
-- GSettings changes are batched and synchronized, then verified through an independent `gsettings get` process. A failure restores prior user values and exact previous file bytes; concurrent external changes are retained and incomplete rollback is reported. Multiple targets cannot form one filesystem transaction; process termination or power loss can interrupt the sequence.
-- The controller saves the app record before applying system changes and restores the previous record if the backend fails. Successful backend state drives the application theme. Reload reflects partial external state after an error where possible.
-- Application TOML saves serialize within one app instance; do not edit the same TOML concurrently from multiple instances. Rust system updates have a cross-process lock. No machine-specific configuration or secrets are committed.
-
-Durable tests cover strict TOML, atomic persistence, controller ordering/error recovery, actual control bindings, retained navigation, installed theme matching, GSettings/file rollback, managed environment blocks, syntax validation, and missing optional targets. Native verification uses the real bridge and independent GTK/Qt probes, with exact restoration of personal files after temporary Light/Dark checks. 
-
-The appearance, accent, background, fonts, date/time, and Display controls are available (see public-api.md). The remaining catalog controls remain disabled previews. The single-level sidebar is persistent, becomes icon-only below 1000 logical pixels, and uses wrapping connected page buttons with leading icons under the category title. The native minimum width is 360 logical pixels.
-
-## Dependent applications and public operations
-
-The common configuration decoder, XDG path contract, and Material theme live in
-`packages/remya_settings_client`. Settings retains the writer/controller and Rust
-system backend. Remya Bar consumes the effective release theme through the public
-D-Bus service; it does not apply system preferences or depend on Settings pages.
-See [public interfaces](public-api.md) for CLI/D-Bus operation parity and
-[XDG layout](xdg-layout.md) for debug, installation, and runtime paths.
-
-Automatic cleanup is an app-owned Rust service preference in `cleanup.toml`, next
-to the main config. It does not reconcile with another system scheduler. Version 1
-stores `[automatic]` (`enabled`, `frequency`, `trash_days`, `cache_days`,
-`downloads_days`) and optional `[last_run]` (`at`, `freed_bytes`, `error`). Defaults
-are disabled, low-space, 30, 30, 0 respectively. Zero days means Never. Strict parse
-or persistence failures remain visible and do not overwrite an invalid file.
-See [Storage](storage.md) for scheduling and permanent deletion versus Trash.
+Values live in `$XDG_CONFIG_HOME/remya/<config>/settings.toml` (debug root:
+`<repo>/config/<config>/settings.toml`), one top-level key per setting. Missing
+keys use defaults. Writes preserve other keys and use the existing atomic write
+helper. Neither discovery nor reads write application preferences. The daemon
+never deletes an unregistered application's file. No app-specific migration or
+compatibility fields such as the old Bar sidebar `expected` field exist here.
+See [public API](public-api.md#application-preferences) for revisions and deep links.

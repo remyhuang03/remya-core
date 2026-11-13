@@ -230,6 +230,11 @@ impl Updates {
             self.change(|state| state.updater = updater);
         }
     }
+    pub fn manage(&self) -> Result<(), String> {
+        self.refresh();
+        self.0.state.lock().unwrap().schedule.manage()
+    }
+
     pub fn state(&self) -> Value {
         let state = self.0.state.lock().unwrap();
         let missing = self.missing();

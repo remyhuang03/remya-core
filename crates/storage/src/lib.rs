@@ -140,6 +140,18 @@ impl Storage {
             process,
         }
     }
+    pub fn manage(&self) -> Result<(), String> {
+        self.refresh_policy();
+        let i = self.inner.lock().unwrap();
+        if let Some(error) = &i.config_error {
+            return Err(error.clone());
+        }
+        if !self.config.try_exists().map_err(|e| e.to_string())? {
+            i.prefs.save(&self.config)?;
+        }
+        Ok(())
+    }
+
     pub fn take_dirty(&self) -> bool {
         std::mem::take(&mut self.inner.lock().unwrap().dirty)
     }
@@ -313,6 +325,14 @@ impl Storage {
         })
     }
     pub fn set(&self, id: &str, text: &str) -> Result<Value, String> {
+        let state = self.set_inner(id, text)?;
+        if id.starts_with("cleanup.") {
+            self.manage()?;
+        }
+        Ok(state)
+    }
+
+    fn set_inner(&self, id: &str, text: &str) -> Result<Value, String> {
         self.refresh_policy();
         if ["storage.usage", "storage.volumes"].contains(&id) {
             return Err("ReadOnly:Storage measurements cannot be written".into());

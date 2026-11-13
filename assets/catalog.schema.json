@@ -188,7 +188,7 @@
             "properties": {
               "value": {
                 "type": "string",
-                "pattern": "^#[0-9A-Fa-f]{6}$"
+                "pattern": "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$"
               }
             }
           }
@@ -220,8 +220,7 @@
           "then": {
             "properties": {
               "value": {
-                "type": "string",
-                "minLength": 1
+                "type": "string"
               }
             }
           }
@@ -237,8 +236,7 @@
           "then": {
             "properties": {
               "value": {
-                "type": "string",
-                "minLength": 1
+                "type": "string"
               }
             }
           }
@@ -342,7 +340,6 @@
         },
         "sections": {
           "type": "array",
-          "minItems": 1,
           "items": {
             "$ref": "#/$defs/section"
           }

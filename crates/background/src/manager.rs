@@ -7,7 +7,7 @@ use crate::{
     system::{Desktop, layer_warnings},
     video::{self, UNIT, Video},
 };
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -201,10 +201,10 @@ impl<D: Desktop> BackgroundManager<D> {
             validate(saved)?;
             self.saved = loaded.clone();
         }
+        self.saved = loaded.clone();
         let observed = self.observe()?;
         if loaded.is_none() {
-            // First use records the actual desktop; defaults are never applied to it.
-            self.persist(&observed)?;
+            // Until managed, the snapshot follows the live desktop.
             self.saved = Some(observed.clone());
         }
         self.monitors = self.desktop.monitors()?;
@@ -213,6 +213,15 @@ impl<D: Desktop> BackgroundManager<D> {
         self.observed = Some(observed);
         self.refresh_previews();
         self.refresh_accent();
+        Ok(())
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.paths.config.try_exists().map_err(|e| e.to_string())? {
+            self.persist(self.saved.as_ref().ok_or("Background cannot be detected")?)?;
+        }
         Ok(())
     }
 
@@ -1069,6 +1078,8 @@ mod tests {
         assert_eq!(state["conflict"], false);
         assert!(s.fake.0.lock().unwrap().applied.is_empty());
         assert_eq!(file(&s, "hyprpaper.conf"), WALLPAPER);
+        assert!(!s.root.path().join("background.toml").exists());
+        s.manager.manage().unwrap();
         assert!(file(&s, "background.toml").contains("/old.png"));
     }
 
@@ -1199,6 +1210,7 @@ mod tests {
     fn failed_application_restores_files_and_retains_the_saved_configuration() {
         let mut s = setup(Some(WALLPAPER));
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         let saved = file(&s, "background.toml");
         s.fake.0.lock().unwrap().fail_apply = true;
         let picked = source(&s, "picked.png");
@@ -1224,6 +1236,7 @@ mod tests {
     fn external_changes_conflict_and_both_resolutions_work() {
         let mut s = setup(Some(WALLPAPER));
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         let conf = s.root.path().join("hyprpaper.conf");
         let edited = WALLPAPER.replace("/old.png", "/edited.png");
         fs::write(&conf, &edited).unwrap();
@@ -1346,6 +1359,7 @@ mod tests {
     fn a_failed_restart_restores_the_file_and_the_running_wallpaper() {
         let mut s = setup(Some(WALLPAPER));
         s.manager.refresh().unwrap();
+        s.manager.manage().unwrap();
         let saved = file(&s, "background.toml");
         s.fake.0.lock().unwrap().fail_restart = true;
         assert!(

@@ -1,6 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 
-import 'theme_config.dart';
+import 'package:remya_client/settings_contract.dart';
 
 extension MaterialStyleKey on DynamicSchemeVariant {
   String get configKey => name.replaceAllMapped(

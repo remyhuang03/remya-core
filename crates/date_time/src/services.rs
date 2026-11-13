@@ -80,7 +80,7 @@ impl Timedate {
     pub(crate) fn set_persistent_servers(
         &self,
         servers: &[String],
-    ) -> Result<crate::api::DateTimeState, String> {
+    ) -> Result<crate::DateTimeState, String> {
         crate::ntp_config::validate_servers(servers)?;
         if !self.read()?.ntp {
             return Err("Enable automatic time before choosing servers".into());
@@ -111,7 +111,7 @@ impl Timedate {
         Ok(())
     }
 
-    pub(crate) fn sync_now(&self) -> Result<crate::api::DateTimeState, String> {
+    pub(crate) fn sync_now(&self) -> Result<crate::DateTimeState, String> {
         if !self.read()?.ntp {
             return Err("Enable automatic time before synchronizing".into());
         }

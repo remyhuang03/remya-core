@@ -2,7 +2,7 @@ use crate::{
     invalid, now,
     scan::{self, Roots},
 };
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{

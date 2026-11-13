@@ -1,4 +1,4 @@
-use remya_settings_camera::{Backend, native::Native};
+use remya_camera::{Backend, native::Native};
 fn main() {
     println!(
         "{}",

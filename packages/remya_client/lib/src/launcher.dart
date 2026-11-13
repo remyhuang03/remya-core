@@ -12,7 +12,7 @@ Future<void> openRemyaSettings({
         'Build the sibling remya-settings repository with fvm flutter build linux --debug first.',
       );
     }
-    await Process.start(debugExecutable.path, ['open', page], mode: .detached);
+    await Process.start(debugExecutable.path, ['--gui', page], mode: .detached);
     return;
   }
   final client = SettingsClient();

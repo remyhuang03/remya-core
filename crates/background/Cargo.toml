@@ -1,5 +1,5 @@
 [package]
-name = "remya_settings_background"
+name = "remya_background"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 material-colors = { version = "0.5.0", features = ["quantize"] }
-remya_settings_display = { path = "../display" }
+remya_display = { path = "../display" }
 serde = { version = "1", features = ["derive"] }
 sha2 = "0.11"
 sysinfo = { version = "0.40.1", default-features = false, features = ["system"] }

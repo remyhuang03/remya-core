@@ -60,19 +60,14 @@ config/*.local.toml
 # Python development tools
 __pycache__/
 
-/config/date-time.toml
-/config/display.toml
-/config/background.toml
-/config/accent.toml
-/config/backgrounds/
-/config/background-previews/
+# Generated debug configuration and state
+/config/*/settings.toml
+/config/system/
+/config/shared/*
+!/config/shared/theme.example.toml
+/config/cache/
+/config/data/
+/config/state/
 
-/config/default-apps.toml
-/config/text-size.toml
-
-/config/avatar.png
-
-# Debug battery history
-/config/power.sqlite3
-/config/power.sqlite3-shm
-/config/power.sqlite3-wal
+# Local package checkouts
+**/pubspec_overrides.yaml

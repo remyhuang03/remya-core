@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:material_color_utilities/material_color_utilities.dart';
 import 'package:material_ui/material_ui.dart';
 
-const _root = 'packages/remya_settings_client/assets';
+const _root = 'packages/remya_ui/assets';
 
 Map<String, ({String icon, Color? color})> _providers = const {};
 Future<void>? _loading;

@@ -170,6 +170,7 @@ fn first_use_adopts_live_values_without_writing_hyprland_files() {
 fn options_added_after_first_use_adopt_the_live_value() {
     let mut s = setup();
     s.input.refresh().unwrap();
+    s.input.manage().unwrap();
     let path = s._dir.path().join("input.toml");
     let mut saved: Saved = toml::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
     saved.options.remove("mouse.pointer-speed");
@@ -287,15 +288,18 @@ fn invalid_and_rejected_values_change_nothing() {
     assert!(s.input.set("mouse.pointer-speed", "0.3").is_err());
     assert!(s.input.state()["error"].is_string());
     assert!(!s.hypr.join("remya-settings/input.lua").exists());
-    let saved: Saved =
-        toml::from_str(&fs::read_to_string(s._dir.path().join("input.toml")).unwrap()).unwrap();
-    assert_eq!(saved.options["mouse.pointer-speed"], json!(0.1));
+    assert!(!s._dir.path().join("input.toml").exists());
+    assert_eq!(
+        s.input.saved.as_ref().unwrap().options["mouse.pointer-speed"],
+        json!(0.1)
+    );
 }
 
 #[test]
 fn conflicts_block_writes_until_resolved_either_way() {
     let mut s = setup();
     s.input.refresh().unwrap();
+    s.input.manage().unwrap();
     s.world
         .0
         .lock()

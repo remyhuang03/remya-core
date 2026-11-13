@@ -1,8 +1,8 @@
-//! models.dev provider catalog, cached as `$XDG_CACHE_HOME/remya/settings/models-dev.json`.
+//! models.dev provider catalog, cached as `$XDG_CACHE_HOME/remya/core/models-dev.json`.
 use serde_json::{Value, json};
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::Path,
     time::{Duration, SystemTime},
 };
 
@@ -24,18 +24,6 @@ impl Status {
             Status::Unavailable => "unavailable",
         }
     }
-}
-
-/// Relative XDG values are ignored, as the XDG specification requires.
-pub fn cache_path() -> Option<PathBuf> {
-    let absolute = |name| {
-        std::env::var_os(name)
-            .map(PathBuf::from)
-            .filter(|path| path.is_absolute())
-    };
-    absolute("XDG_CACHE_HOME")
-        .or_else(|| absolute("HOME").map(|home| home.join(".cache")))
-        .map(|root| root.join("remya/settings/models-dev.json"))
 }
 
 pub fn fetch() -> Result<Vec<u8>, String> {
@@ -81,7 +69,7 @@ pub fn resolve(
     if let Some(value) = fetch().ok().as_deref().and_then(|bytes| {
         let value = parse(bytes)?;
         if let Some(path) = cache
-            && let Err(error) = remya_settings_display::atomic_write(path, bytes)
+            && let Err(error) = remya_display::atomic_write(path, bytes)
         {
             eprintln!("models.dev cache: {error}");
         }
@@ -162,7 +150,7 @@ mod tests {
     #[test]
     fn cache_selection() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("remya/settings/models-dev.json");
+        let path = directory.path().join("remya/core/models-dev.json");
         let now = SystemTime::now();
         let offline = || Err::<Vec<u8>, _>("offline".to_string());
         assert_eq!(resolve(Some(&path), now, offline).0, Status::Unavailable);

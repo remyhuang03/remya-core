@@ -178,9 +178,7 @@ impl HostnameManager {
                 validate_static(&config.static_hostname)?;
                 config.static_hostname
             } else {
-                let name = self.observed.as_ref().unwrap().static_hostname.clone();
-                self.persist(&name)?;
-                name
+                self.observed.as_ref().unwrap().static_hostname.clone()
             };
             self.saved = Some(name);
             Ok(())
@@ -188,6 +186,15 @@ impl HostnameManager {
         self.read_error = result.as_ref().err().cloned();
         result
     }
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if !self.path.try_exists().map_err(|e| e.to_string())? {
+            self.persist(&self.saved()?)?;
+        }
+        Ok(())
+    }
+
     fn persist(&self, name: &str) -> Result<(), String> {
         let bytes = toml::to_string(&Config {
             version: 1,
@@ -295,6 +302,8 @@ mod tests {
         assert!(manager.observe(Err("offline".into())).is_err());
         assert!(!file.exists());
         manager.observe(Ok(state("original"))).unwrap();
+        assert!(!file.exists());
+        manager.adopt().unwrap();
         assert!(!manager.conflict());
         manager
             .observe(Ok(HostnameState {

@@ -27,8 +27,11 @@ Rust GStreamer 0.25 bindings (MIT/Apache-2.0) dynamically link system GStreamer
 1.28+, using pipewiresrc, videoconvert, videoscale, videorate and appsink.
 PipeWire and WirePlumber must be running. Preview negotiates the device's reported
 frame rate and delivers a letterboxed 640x480 RGBA image at 15 FPS, with a single
-latest-frame queue. flutter_rust_bridge 2.13.0 carries frames to RawImage; frames
-are neither persisted nor sent over D-Bus. Missing plugins and capture errors
+latest-frame queue. The opt-in `remya_camera/preview` feature exposes plain Rust
+start, next-frame and stop functions in `remya_camera::preview`; it is disabled
+by default. Core contains no Flutter bridge. Settings depends on this feature
+through a normal Cargo path dependency and owns the FRB wrapper and Dart bindings.
+Frames are neither persisted nor sent over D-Bus. Missing plugins and capture errors
 are reported. Stop, selection changes, page disposal and backgrounding release
 capture. A stopped or disconnected preview must be explicitly restarted.
 
@@ -38,6 +41,12 @@ recording, photographs or application permission management is provided.
 
 ## Verification
 
+The GUI split cleanup (2026-11-14) passes Core workspace formatting, Clippy and
+tests, plus Clippy for all camera targets with `--features preview`. Settings'
+FRB 2.13.0 wrapper passes build, Clippy, its hardware-free invalid-handle test,
+and a release shared-library link. This cleanup did not repeat live capture or
+parameter writes and did not install either application.
+
 Rust unit tests cover initialization, validation, stale identity, unsupported
 fields, both conflict resolutions, reset, failed detection/readback/persistence,
 and retention after unplugging. Flutter camera tests cover request identity,
@@ -46,6 +55,7 @@ write/readback regression verifies sliders retain their released value until
 the operation finishes, without briefly displaying the previous value.
 
 The explicit hardware examples `verify` and `preview` require attached cameras:
+`cargo run -p remya_camera --example preview --features preview` enables capture.
 `verify` writes and restores each of the four adjustable parameters, checking
 readback; `preview` obtains and releases a frame for each detected node.
 On this workstation both the HP normal and IR sources produced 640x480 frames;

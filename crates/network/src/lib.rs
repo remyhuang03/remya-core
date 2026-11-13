@@ -3,7 +3,7 @@ pub mod airplane;
 pub mod nm;
 pub mod proxy;
 
-use remya_settings_display::atomic_write;
+use remya_display::atomic_write;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
@@ -326,7 +326,7 @@ impl From<&Profile> for Prefs {
 
 #[derive(Debug, PartialEq)]
 pub enum Change {
-    Prefs(Prefs),
+    Prefs(Box<Prefs>),
     Password(String),
 }
 
@@ -533,7 +533,8 @@ impl<B: Backend> Manager<B> {
     }
 
     fn load_saved(&mut self, observed: &Config) -> Result<(), String> {
-        if self.saved.is_some() {
+        if !self.path.try_exists().map_err(|e| e.to_string())? {
+            self.saved = Some(observed.clone());
             return Ok(());
         }
         match fs::read_to_string(&self.path) {
@@ -550,7 +551,6 @@ impl<B: Backend> Manager<B> {
                 self.saved = Some(toml::from_str(&text).map_err(invalid)?);
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                self.persist(observed)?;
                 self.saved = Some(observed.clone());
             }
             Err(e) => return Err(e.to_string()),
@@ -664,6 +664,18 @@ impl<B: Backend> Manager<B> {
         self.config_error = result.err();
         self.settle(false);
         self.settle(true);
+        Ok(())
+    }
+
+    /// Start managing only after a successful live read.
+    pub fn manage(&mut self) -> Result<(), String> {
+        self.refresh()?;
+        if let Some(error) = &self.config_error {
+            return Err(error.clone());
+        }
+        if !self.path.try_exists().map_err(|e| e.to_string())? {
+            self.persist(self.saved.as_ref().ok_or("Network cannot be detected")?)?;
+        }
         Ok(())
     }
 
@@ -898,7 +910,7 @@ impl<B: Backend> Manager<B> {
         }
         let ip_changed = prefs.ip != profile.ip;
         self.backend
-            .update(&profile.path, &Change::Prefs(prefs.clone()))?;
+            .update(&profile.path, &Change::Prefs(Box::new(prefs.clone())))?;
         self.refresh()?;
         let after = self.profile(uuid)?;
         if Prefs::from(&after) != prefs {
@@ -1146,7 +1158,8 @@ impl<B: Backend> Manager<B> {
             if profile.autoconnect {
                 let mut prefs = Prefs::from(&profile);
                 prefs.autoconnect = false;
-                self.backend.update(&profile.path, &Change::Prefs(prefs))?;
+                self.backend
+                    .update(&profile.path, &Change::Prefs(Box::new(prefs)))?;
             }
         }
         // Inventory adoption records the new profiles as they now are.
@@ -1248,6 +1261,12 @@ impl<B: Backend> Manager<B> {
     }
 
     pub fn set(&mut self, key: &str, value: &str) -> Result<Value, String> {
+        let result = self.set_inner(key, value)?;
+        self.manage()?;
+        Ok(result)
+    }
+
+    fn set_inner(&mut self, key: &str, value: &str) -> Result<Value, String> {
         self.failure = None;
         let flag = || match value {
             "true" => Ok(true),
@@ -1549,7 +1568,7 @@ impl<B: Backend> Manager<B> {
                     };
                     if *prefs != Prefs::from(&profile) {
                         self.backend
-                            .update(&profile.path, &Change::Prefs(prefs.clone()))?;
+                            .update(&profile.path, &Change::Prefs(Box::new(prefs.clone())))?;
                         if prefs.ip != profile.ip {
                             reapply.push(profile.uuid);
                         }
@@ -1565,6 +1584,7 @@ impl<B: Backend> Manager<B> {
             }
             _ => return Err(invalid("Unknown resolution")),
         }
+        self.manage()?;
         Ok(self.state())
     }
 }
@@ -1883,6 +1903,8 @@ mod tests {
         fake.0.lock().unwrap().read_error = None;
         manager.refresh().unwrap();
         assert_eq!(manager.state()["initialized"], true);
+        assert!(!root.path().join("network.toml").exists());
+        manager.manage().unwrap();
         assert!(root.path().join("network.toml").exists());
         assert!(calls(&fake).is_empty());
     }
@@ -1891,6 +1913,7 @@ mod tests {
     fn conflicts_preserve_values_and_resolve_both_ways() {
         let (fake, mut manager, root) = setup();
         manager.refresh().unwrap();
+        manager.manage().unwrap();
         fake.0.lock().unwrap().snapshot.profiles[0].autoconnect = false;
         manager.refresh().unwrap();
         let state = manager.state();
@@ -1921,6 +1944,7 @@ mod tests {
     fn failed_resolution_retains_the_conflict() {
         let (fake, mut manager, _root) = setup();
         manager.refresh().unwrap();
+        manager.manage().unwrap();
         fake.0.lock().unwrap().snapshot.profiles[0].autoconnect = false;
         manager.refresh().unwrap();
         fake.0.lock().unwrap().reject = true;
@@ -1936,6 +1960,7 @@ mod tests {
     fn inventory_changes_are_adopted_not_conflicts() {
         let (fake, mut manager, root) = setup();
         manager.refresh().unwrap();
+        manager.manage().unwrap();
         fake.0
             .lock()
             .unwrap()

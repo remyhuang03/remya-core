@@ -2,7 +2,7 @@
 //!
 //! Printers are live CUPS state: Settings keeps no copy, so there is nothing to
 //! reconcile. Every write is checked against a fresh listing and read back.
-use remya_settings_display::run_bytes;
+use remya_display::run_bytes;
 use serde_json::{Value, json};
 use std::{
     thread,

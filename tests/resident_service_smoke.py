@@ -1,4 +1,4 @@
-"""Verify native residency, repeated GUI close/reopen and PSS on an isolated bus."""
+"""Verify standalone Core residency and reload PSS on an isolated bus."""
 import json
 import os
 from pathlib import Path
@@ -8,7 +8,7 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-BUNDLE = ROOT / 'build/linux/x64/release/bundle'
+BINARIES = ROOT / 'target/release'
 
 
 def pss(pid):
@@ -17,9 +17,8 @@ def pss(pid):
 
 
 def checks():
-    service = subprocess.Popen([str(BUNDLE / 'libexec/remya-settings-service')])
-    gui = None
-    cli = BUNDLE / 'libexec/remya_settings_cli'
+    service = subprocess.Popen([str(BINARIES / 'remyad')])
+    cli = BINARIES / 'remya'
     def call(*args):
         result = subprocess.run([str(cli), *args], capture_output=True, text=True, timeout=35)
         assert result.returncode == 0, result.stderr
@@ -35,38 +34,16 @@ def checks():
                     raise
                 time.sleep(.1)
         initial = pss(service.pid)
-        rounds = []
         for _ in range(3):
-            # The private GUI entrypoint exercises real window closure without
-            # requiring an administrator password in an isolated test session.
-            gui = subprocess.Popen([str(BUNDLE / 'remya_settings'), '--gui', 'date-time'])
-            deadline = time.monotonic() + 15
-            while True:
-                clients = json.loads(subprocess.check_output(['hyprctl', 'clients', '-j']))
-                if any(c['pid'] == gui.pid for c in clients):
-                    break
-                assert gui.poll() is None, 'GUI failed to start'
-                assert time.monotonic() < deadline, 'GUI did not map'
-                time.sleep(.1)
-            time.sleep(.5)
-            visible = pss(service.pid) + pss(gui.pid)
-            call('close')
-            gui.wait(timeout=10)
+            call('reload')
             assert call('get', 'date-time')['timezone']
-            closed = pss(service.pid)
-            assert visible > closed + 20 * 1024, (visible, closed)
-            rounds.append({'visible_pss_kib': visible, 'closed_pss_kib': closed})
-            gui = None
-        assert max(r['closed_pss_kib'] for r in rounds) - initial < 5 * 1024, 'Resident memory grew unexpectedly'
-        output = {'native_initial_pss_kib': initial, 'rounds': rounds}
-        (ROOT / 'build/resident-memory.json').write_text(json.dumps(output, indent=2))
-        print('PASS: native residency, 3 GUI close/reopen rounds, engine memory released:', output)
+        closed = pss(service.pid)
+        assert closed - initial < 5 * 1024, 'Resident memory grew unexpectedly'
+        output = {'initial_pss_kib': initial, 'after_reload_pss_kib': closed}
+        print('PASS: standalone Core residency and reload:', output)
         call('quit')
         service.wait(timeout=10)
     finally:
-        if gui is not None and gui.poll() is None:
-            gui.terminate()
-            gui.wait(timeout=10)
         if service.poll() is None:
             service.terminate()
             service.wait(timeout=10)

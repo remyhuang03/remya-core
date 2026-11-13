@@ -1,6 +1,6 @@
 //! Refreshes display state as soon as Hyprland reports an output change.
 use crate::{signal, state::State};
-use remya_settings_display::Hyprctl;
+use remya_display::Hyprctl;
 use std::{
     io::{BufRead, BufReader},
     os::fd::AsRawFd,
@@ -39,7 +39,7 @@ pub fn watch_sound(state: Arc<Mutex<State>>, bus: gio::DBusConnection) {
         state.sound.state()
     });
     thread::spawn(move || {
-        remya_settings_sound::pulse::watch_default_output(move || {
+        remya_sound::pulse::watch_default_output(move || {
             let _ = sender.try_send(());
         });
     });
@@ -115,7 +115,7 @@ pub fn watch_network(
 ) -> Option<[gio::SignalSubscription; 2]> {
     let (sender, receiver) = mpsc::channel::<Option<(String, u32)>>();
     let subscriptions =
-        remya_settings_network::nm::subscribe(move |change| drop(sender.send(change))).ok()?;
+        remya_network::nm::subscribe(move |change| drop(sender.send(change))).ok()?;
     thread::spawn(move || {
         while let Ok(first) = receiver.recv() {
             thread::sleep(Duration::from_millis(500));

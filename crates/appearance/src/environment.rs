@@ -1,5 +1,5 @@
-use crate::api::{SystemThemeMode, ThemeTargetResult, ThemeTargetStatus};
 use crate::files::{FileChange, read_optional};
+use crate::{SystemThemeMode, ThemeTargetResult, ThemeTargetStatus};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};

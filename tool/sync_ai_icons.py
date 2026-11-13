@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate AI provider brand icons and manifest.json for remya_settings_client.
+"""Regenerate AI provider brand icons and manifest.json for remya_client.
 
 Downloads a pinned @lobehub/icons-static-svg (MIT) tarball, verifies its npm
 integrity hash and copies one SVG per CodexBar provider id. The tarball is
@@ -31,7 +31,7 @@ LOBE_INTEGRITY = (
 MODELS_DEV_URL = "https://models.dev/api.json"
 
 OUT = Path(__file__).resolve().parent.parent / (
-    "packages/remya_settings_client/assets/ai_providers"
+    "packages/remya_ui/assets/ai_providers"
 )
 
 # CodexBar id -> lobe icon slug; None skips an icon whose lobe namesake is a
