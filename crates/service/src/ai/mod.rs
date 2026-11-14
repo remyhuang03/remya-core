@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, mpsc},
     time::{Duration, Instant, SystemTime},
 };
 
@@ -32,10 +32,32 @@ fn invalid(message: &str) -> String {
 }
 
 struct Probe {
-    at: Instant,
     updated_at: String,
-    version: Option<String>,
     usage: Vec<Value>,
+}
+
+#[derive(Default)]
+struct ProbeCache {
+    generation: u64,
+    value: Option<Probe>,
+    refreshing: bool,
+    attempted: Option<Instant>,
+    failed: bool,
+    full_attempted: Option<Instant>,
+}
+
+impl ProbeCache {
+    fn invalidate(&mut self) {
+        self.generation += 1;
+        self.attempted = None;
+        self.failed = false;
+    }
+
+    fn state(&self) -> Value {
+        json!({"status":if self.refreshing { "refreshing" } else if self.failed {
+            "failed"
+        } else { "ready" }, "error":if self.failed { Some("AI usage could not be read.") } else { None }})
+    }
 }
 
 struct Snapshot {
@@ -48,15 +70,22 @@ struct Snapshot {
 
 type Models = (Instant, Status, Option<Arc<Value>>);
 
-type RunProbe = dyn Fn(&Path) -> Result<(Option<String>, Vec<Value>), String> + Send + Sync;
+#[derive(Default)]
+struct ModelsCache {
+    value: Option<Models>,
+    refreshing: bool,
+}
+
+type RunProbe = dyn Fn(&Path, &str) -> Result<Vec<Value>, String> + Send + Sync;
 
 pub struct Ai {
     prefs: PathBuf,
     cache: PathBuf,
     // The generation prevents an old in-flight probe from undoing a Set invalidation.
-    probe: Mutex<(u64, Option<Arc<Probe>>)>,
-    models: Mutex<Option<Models>>,
+    probe: Mutex<ProbeCache>,
+    models: Mutex<ModelsCache>,
     writes: Mutex<()>,
+    notifier: Mutex<Option<mpsc::Sender<()>>>,
     run_probe: Box<RunProbe>,
 }
 
@@ -103,15 +132,7 @@ fn classify(provider: &Value, dump: Option<&Value>, usage: Option<&Value>) -> Vi
     }
     if credential_configured(dump) {
         return match error {
-            Some(error) => Visibility::Visible(
-                "error",
-                Some(
-                    error["message"]
-                        .as_str()
-                        .unwrap_or("Usage unavailable")
-                        .into(),
-                ),
-            ),
+            Some(error) => Visibility::Visible("error", Some(short_error(error))),
             None => Visibility::Visible("needs-setup", None),
         };
     }
@@ -121,6 +142,35 @@ fn classify(provider: &Value, dump: Option<&Value>, usage: Option<&Value>) -> Vi
         return Visibility::Hidden;
     }
     Visibility::Catalog
+}
+
+/// One bounded line, including for errors returned by provider detail reads.
+fn short_error(error: &Value) -> String {
+    let line = error["message"]
+        .as_str()
+        .unwrap_or("Usage unavailable")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if line.chars().count() > 200 {
+        format!("{}…", line.chars().take(199).collect::<String>())
+    } else {
+        line
+    }
+}
+
+fn summarize_usage(mut state: Value, visible: &[Value]) -> Value {
+    let failures = visible
+        .iter()
+        .filter(|row| row["usageError"].is_string())
+        .count();
+    if failures > 0 {
+        state["error"] = json!(format!(
+            "Usage could not be read for {failures} tracked provider{}.",
+            if failures == 1 { "" } else { "s" }
+        ));
+    }
+    state
 }
 
 fn models_dev_id(id: &str, catalog: Option<&Value>) -> Option<String> {
@@ -173,7 +223,6 @@ struct Inputs<'a> {
     providers: &'a [Value],
     dump: &'a [Value],
     usage: &'a [Value],
-    automatic: bool,
     custom: &'a [(Custom, bool)],
     models_dev: Option<&'a Value>,
 }
@@ -223,11 +272,11 @@ fn build(inputs: &Inputs) -> (Vec<Value>, Vec<Value>) {
                 });
                 visible.push(json!({
                     "id":id,"name":provider["displayName"],"kind":"codexbar","status":status,
-                    "enabled":inputs.automatic || provider["enabled"] == true,
+                    "enabled":provider["enabled"] == true,
                     "source":source,"plan":plan,"sourceModes":source_modes(provider),
                     "credential":codexbar_credential(provider, Some(credential_configured(dump))),
                     "envVars":provider["authentication"]["environmentVariables"].as_array().cloned().unwrap_or_default(),
-                    "error":error,"baseUrl":null,"modelsDev":models_dev,"windows":windows(ready),
+                    "error":error,"usageError":usage.and_then(|row| row["error"].as_object().map(|_| short_error(&row["error"]))),"baseUrl":null,"modelsDev":models_dev,"windows":windows(ready),
                 }));
             }
             Visibility::Catalog => catalog.push(json!({
@@ -242,7 +291,7 @@ fn build(inputs: &Inputs) -> (Vec<Value>, Vec<Value>) {
             "id":custom.id,"name":custom.name,"kind":"custom","status":"custom","enabled":true,
             "source":null,"plan":null,"sourceModes":[],
             "credential":{"apiKey":true,"cookie":false,"configured":configured},
-            "envVars":[],"error":null,"baseUrl":custom.base_url,"modelsDev":custom.models_dev,"windows":[],
+            "envVars":[],"error":null,"usageError":null,"baseUrl":custom.base_url,"modelsDev":custom.models_dev,"windows":[],
         }));
     }
     let mut extra: Vec<Value> = inputs
@@ -286,83 +335,191 @@ impl Ai {
         Self {
             prefs,
             cache,
-            probe: Mutex::new((0, None)),
-            models: Mutex::new(None),
+            probe: Mutex::new(ProbeCache::default()),
+            models: Mutex::new(ModelsCache::default()),
             writes: Mutex::new(()),
-            run_probe: Box::new(|path| {
-                let version = codexbar::version()?;
-                let usage = if version.is_some() {
-                    codexbar::probe(path)?
-                } else {
-                    Vec::new()
-                };
-                Ok((version, usage))
-            }),
+            notifier: Mutex::new(None),
+            run_probe: Box::new(codexbar::provider_usage),
         }
     }
 
-    fn probe(&self, path: &Path) -> Result<Arc<Probe>, String> {
-        let generation = {
-            let cache = self.probe.lock().unwrap();
-            if let Some(probe) = &cache.1
-                && probe.at.elapsed() < TTL
-            {
-                return Ok(probe.clone());
-            }
-            cache.0
-        };
-        let (version, mut usage) = (self.run_probe)(path)?;
-        usage.iter_mut().for_each(strip_email);
-        let probe = Arc::new(Probe {
-            at: Instant::now(),
-            updated_at: now_iso(),
-            version,
-            usage,
-        });
+    pub fn set_notifier(&self, notifier: mpsc::Sender<()>) {
+        *self.notifier.lock().unwrap() = Some(notifier);
+    }
+
+    fn notify(&self) {
+        if let Some(notifier) = &*self.notifier.lock().unwrap() {
+            let _ = notifier.send(());
+        }
+    }
+
+    fn probe(
+        self: &Arc<Self>,
+        path: &Path,
+        providers: &[Value],
+        dump: &[Value],
+        automatic: bool,
+    ) -> (Option<String>, Vec<Value>, Value) {
         let mut cache = self.probe.lock().unwrap();
-        if cache.0 == generation {
-            cache.1 = Some(probe.clone());
+        if !cache.refreshing && cache.attempted.is_none_or(|at| at.elapsed() >= TTL) {
+            cache.refreshing = true;
+            let generation = cache.generation;
+            let mut relevant = Vec::new();
+            let mut discovery = Vec::new();
+            let full = automatic && cache.full_attempted.is_none_or(|at| at.elapsed() >= TTL);
+            for provider in providers.iter().filter(|row| row["enabled"] == true) {
+                let id = provider["provider"].as_str().unwrap();
+                let configured = dump.iter().find(|entry| entry["id"] == id);
+                let previous = cache
+                    .value
+                    .as_ref()
+                    .and_then(|probe| probe.usage.iter().find(|row| row["provider"] == id));
+                if credential_configured(configured)
+                    || configured.is_some_and(|entry| entry["enabled"] == true)
+                    || previous.is_some_and(|row| row["usage"].is_object())
+                {
+                    relevant.push(id.to_owned());
+                } else if full {
+                    discovery.push(id.to_owned());
+                }
+            }
+            let phases = if discovery.is_empty() {
+                vec![relevant]
+            } else {
+                vec![relevant, discovery]
+            };
+            let ai = self.clone();
+            let path = path.to_owned();
+            std::thread::spawn(move || {
+                let mut succeeded = false;
+                let last = phases.len() - 1;
+                for (index, ids) in phases.into_iter().enumerate() {
+                    if index == last {
+                        let mut cache = ai.probe.lock().unwrap();
+                        if cache.generation != generation {
+                            cache.refreshing = false;
+                            drop(cache);
+                            ai.notify();
+                            return;
+                        }
+                        if full {
+                            cache.full_attempted = Some(Instant::now());
+                        }
+                    }
+                    let mut rows = codexbar::probe(&path, &ids, &*ai.run_probe);
+                    for row in &mut rows {
+                        strip_email(row);
+                        if row["error"].is_object() {
+                            row["error"]["message"] = json!(short_error(&row["error"]));
+                        }
+                    }
+                    let successful = rows.iter().any(|row| row["usage"].is_object());
+                    succeeded |= successful;
+                    let mut cache = ai.probe.lock().unwrap();
+                    if cache.generation != generation {
+                        cache.refreshing = false;
+                        drop(cache);
+                        ai.notify();
+                        return;
+                    }
+                    let probe = cache.value.get_or_insert_with(|| Probe {
+                        updated_at: String::new(),
+                        usage: Vec::new(),
+                    });
+                    for mut row in rows {
+                        if let Some(old) = probe
+                            .usage
+                            .iter_mut()
+                            .find(|old| old["provider"] == row["provider"])
+                        {
+                            // Keep the last quota on failure, along with the new failure.
+                            if !row["usage"].is_object() && old["usage"].is_object() {
+                                let error = row["error"].clone();
+                                row = old.clone();
+                                row["error"] = error;
+                            }
+                            *old = row;
+                        } else {
+                            probe.usage.push(row);
+                        }
+                    }
+                    if successful {
+                        probe.updated_at = now_iso();
+                    }
+                    cache.failed = !succeeded;
+                    if index == last {
+                        cache.refreshing = false;
+                        cache.attempted = Some(Instant::now());
+                    }
+                    drop(cache);
+                    if !ids.is_empty() || index == last {
+                        ai.notify();
+                    }
+                }
+            });
         }
-        Ok(probe)
+        (
+            cache
+                .value
+                .as_ref()
+                .map(|probe| probe.updated_at.clone())
+                .filter(|at| !at.is_empty()),
+            cache
+                .value
+                .as_ref()
+                .map(|probe| probe.usage.clone())
+                .unwrap_or_default(),
+            cache.state(),
+        )
     }
 
-    fn models_dev(&self) -> (Status, Option<Arc<Value>>) {
-        {
-            let cache = self.models.lock().unwrap();
-            if let Some((at, status, value)) = &*cache
-                && at.elapsed() < TTL
-            {
-                return (*status, value.clone());
+    fn models_dev(self: &Arc<Self>) -> (Status, Option<Arc<Value>>) {
+        let mut cache = self.models.lock().unwrap();
+        if cache.value.is_none() {
+            let (status, value) = models_dev::resolve(Some(&self.cache), SystemTime::now(), || {
+                Err("Background refresh required".into())
+            });
+            cache.value = Some((Instant::now(), status, value.map(Arc::new)));
+            // A fresh disk cache needs no network refresh yet.
+            if status != Status::Fresh {
+                cache.value.as_mut().unwrap().0 = Instant::now() - TTL;
             }
         }
-        let (status, value) =
-            models_dev::resolve(Some(&self.cache), SystemTime::now(), models_dev::fetch);
-        let value = value.map(Arc::new);
-        *self.models.lock().unwrap() = Some((Instant::now(), status, value.clone()));
-        (status, value)
+        let (at, status, value) = cache.value.as_ref().unwrap();
+        let result = (*status, value.clone());
+        if at.elapsed() >= TTL && !cache.refreshing {
+            cache.refreshing = true;
+            let ai = self.clone();
+            std::thread::spawn(move || {
+                let (status, value) =
+                    models_dev::resolve(Some(&ai.cache), SystemTime::now(), models_dev::fetch);
+                let mut cache = ai.models.lock().unwrap();
+                cache.value = Some((Instant::now(), status, value.map(Arc::new)));
+                cache.refreshing = false;
+                drop(cache);
+                ai.notify();
+            });
+        }
+        result
     }
 
-    fn snapshot(&self) -> Result<Snapshot, String> {
+    fn snapshot(self: &Arc<Self>) -> Result<Snapshot, String> {
         let prefs = Prefs::load(&self.prefs)?;
         let path = codexbar::config_path()?;
-        let probe = self.probe(&path)?;
-        let (version, updated_at, usage) = (
-            probe.version.clone(),
-            probe.updated_at.clone(),
-            probe.usage.clone(),
-        );
-        let (automatic, providers, dump) = if version.is_some() {
-            let automatic = !codexbar::configured(&path)?;
+        let version = codexbar::version()?;
+        let automatic = !codexbar::configured(&path)?;
+        let (providers, dump) = if version.is_some() {
             let dump = if automatic {
                 Vec::new()
             } else {
                 codexbar::cli(&path, &["config", "validate"])?;
                 codexbar::dump(&path)?
             };
-            (automatic, codexbar::providers(&path)?, dump)
+            (codexbar::providers(&path)?, dump)
         } else {
-            (true, Vec::new(), Vec::new())
+            (Vec::new(), Vec::new())
         };
+        let (updated_at, mut usage, usage_state) = self.probe(&path, &providers, &dump, automatic);
         let custom: Vec<(Custom, bool)> = prefs
             .custom
             .iter()
@@ -373,13 +530,19 @@ impl Ai {
             providers: &providers,
             dump: &dump,
             usage: &usage,
-            automatic,
             custom: &custom,
             models_dev: models_dev.as_deref(),
+        });
+        let usage_state = summarize_usage(usage_state, &visible);
+        usage.retain(|row| {
+            visible
+                .iter()
+                .any(|provider| provider["id"] == row["provider"])
         });
         let value = json!({
             "codexbar":{"available":version.is_some(),"version":version},
             "updatedAt":updated_at,
+            "usage":usage_state,
             "providers":visible,
             "catalog":catalog,
         });
@@ -391,7 +554,7 @@ impl Ai {
         })
     }
 
-    fn reply(&self) -> Result<Value, String> {
+    fn reply(self: &Arc<Self>) -> Result<Value, String> {
         let value = self.snapshot()?.value;
         Ok(json!({"id":PROVIDERS,"availability":"available","value":value}))
     }
@@ -400,7 +563,7 @@ impl Ai {
         key == PROVIDERS || key.starts_with(PROVIDER_PREFIX)
     }
 
-    pub fn get(&self, key: &str) -> Result<Value, String> {
+    pub fn get(self: &Arc<Self>, key: &str) -> Result<Value, String> {
         let Some(id) = key.strip_prefix(PROVIDER_PREFIX) else {
             return self.reply();
         };
@@ -430,7 +593,7 @@ impl Ai {
         }}))
     }
 
-    pub fn set(&self, key: &str, request: &str) -> Result<Value, String> {
+    pub fn set(self: &Arc<Self>, key: &str, request: &str) -> Result<Value, String> {
         {
             let _write = self.writes.lock().unwrap();
             let result = match key {
@@ -441,8 +604,7 @@ impl Ai {
             };
             result?;
             let mut cache = self.probe.lock().unwrap();
-            cache.0 += 1;
-            cache.1 = None;
+            cache.invalidate();
         }
         self.reply()
     }
@@ -731,7 +893,6 @@ mod tests {
             providers: &providers,
             dump: &dump,
             usage: &usage,
-            automatic: false,
             custom: &custom,
             models_dev: Some(&models),
         });
@@ -783,13 +944,13 @@ mod tests {
     }
 
     #[test]
-    fn automatic_tracking_reports_every_provider_enabled() {
-        let (providers, _, usage) = fixture();
+    fn tracking_uses_codexbar_enabled_flags() {
+        let (mut providers, _, usage) = fixture();
+        providers[0]["enabled"] = json!(true);
         let (visible, _) = build(&Inputs {
             providers: &providers,
             dump: &[],
             usage: &usage,
-            automatic: true,
             custom: &[],
             models_dev: None,
         });
@@ -832,23 +993,48 @@ mod tests {
         let (entered, started) = mpsc::channel();
         let (release, wait) = mpsc::channel();
         let wait = Mutex::new(wait);
-        Arc::get_mut(&mut state.requests.ai).unwrap().run_probe = Box::new(move |_| {
+        let ai = Arc::get_mut(&mut state.requests.ai).unwrap();
+        ai.probe.get_mut().unwrap().value = Some(Probe {
+            updated_at: "previous".into(),
+            usage: vec![json!({"provider":"codex","usage":{}})],
+        });
+        ai.probe.get_mut().unwrap().full_attempted = Some(Instant::now());
+        ai.run_probe = Box::new(move |_, id| {
+            if id != "codex" {
+                return Err("not configured".into());
+            }
             entered.send(()).unwrap();
             wait.lock().unwrap().recv().unwrap();
-            Ok((None, vec![]))
+            Ok(vec![json!({"provider":id,"usage":{}})])
         });
         let requests = state.requests.clone();
         let state = Arc::new(Mutex::new(state));
-        let mut probes = Vec::new();
-        // Both probes must enter: neither may hold the AI cache lock while waiting.
+        let (replied, replies) = mpsc::channel();
+        let (changed, changes) = mpsc::channel();
+        requests.ai.set_notifier(changed);
+        // Concurrent Gets return while exactly one usage probe is blocked.
         for _ in 0..2 {
             let requests = requests.clone();
             let state = state.clone();
-            probes.push(thread::spawn(move || {
-                requests.execute(&state, "Get", &[PROVIDERS.into()])
-            }));
-            started.recv_timeout(Duration::from_secs(2)).unwrap();
+            let replied = replied.clone();
+            thread::spawn(move || {
+                replied
+                    .send(requests.execute(&state, "Get", &[PROVIDERS.into()]))
+                    .unwrap();
+            });
         }
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                replies
+                    .recv_timeout(Duration::from_secs(2))
+                    .expect("Get waited for usage")
+                    .unwrap()
+                    .unwrap()["value"]["usage"]["status"],
+                "refreshing"
+            );
+        }
+        assert!(started.try_recv().is_err());
         let system_work = state.lock().unwrap();
         let (finished, result) = mpsc::channel();
         let app_state = state.clone();
@@ -880,11 +1066,9 @@ mod tests {
         let reply = result.recv_timeout(Duration::from_secs(2));
         drop(system_work);
         release.send(()).unwrap();
-        release.send(()).unwrap();
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(changes.try_recv().is_err());
         app.join().unwrap();
-        for probe in probes {
-            probe.join().unwrap().unwrap().unwrap();
-        }
         let (get, set, replace) = reply.expect("app preferences waited for AI or State");
         assert_eq!(get["value"], false);
         assert_eq!(set["value"], true);
@@ -897,31 +1081,242 @@ mod tests {
         assert!(started.try_recv().is_err());
     }
 
+    fn tracked_providers(ids: &[&str]) -> (Vec<Value>, Vec<Value>) {
+        (
+            ids.iter()
+                .map(|id| {
+                    let mut row = provider(id, true, false);
+                    row["enabled"] = json!(true);
+                    row
+                })
+                .collect(),
+            ids.iter()
+                .map(|id| json!({"id":id,"enabled":true}))
+                .collect(),
+        )
+    }
+
     #[test]
     fn a_probe_started_before_invalidation_cannot_repopulate_the_cache() {
-        use std::{sync::mpsc, thread};
         let root = tempfile::tempdir().unwrap();
         let mut ai = Ai::new(root.path().join("ai.toml"), root.path().join("models.json"));
+        let (providers, dump) = tracked_providers(&["codex"]);
         let (entered, started) = mpsc::channel();
         let (release, wait) = mpsc::channel();
         let wait = Mutex::new(wait);
-        ai.run_probe = Box::new(move |_| {
+        ai.run_probe = Box::new(move |_, id| {
             entered.send(()).unwrap();
-            wait.lock().unwrap().recv().unwrap();
-            Ok((None, vec![]))
+            let value = wait.lock().unwrap().recv().unwrap();
+            Ok(vec![json!({"provider":id,"usage":{"value":value}})])
+        });
+        let (changed, changes) = mpsc::channel();
+        ai.set_notifier(changed);
+        let ai = Arc::new(ai);
+        let probe = || ai.probe(Path::new("unused"), &providers, &dump, false);
+        probe();
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        ai.probe.lock().unwrap().invalidate();
+        release.send("old").unwrap();
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(ai.probe.lock().unwrap().value.is_none());
+        probe();
+        started.recv_timeout(Duration::from_secs(2)).unwrap();
+        release.send("new").unwrap();
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(probe().1[0]["usage"]["value"], "new");
+        assert!(changes.try_recv().is_err());
+    }
+
+    #[test]
+    fn failed_refresh_keeps_usage_and_backs_off() {
+        let root = tempfile::tempdir().unwrap();
+        let mut ai = Ai::new(root.path().join("ai.toml"), root.path().join("models.json"));
+        let (providers, dump) = tracked_providers(&["codex"]);
+        let quota = json!({"primary":{"usedPercent":22}});
+        ai.probe.get_mut().unwrap().value = Some(Probe {
+            updated_at: "previous".into(),
+            usage: vec![json!({"provider":"codex","usage":quota})],
+        });
+        let (changed, changes) = mpsc::channel();
+        ai.set_notifier(changed);
+        let (entered, started) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let wait = Mutex::new(wait);
+        ai.run_probe = Box::new(move |_, _| {
+            entered.send(()).unwrap();
+            wait.lock().unwrap().recv().unwrap()
         });
         let ai = Arc::new(ai);
-        let worker = ai.clone();
-        let probe = thread::spawn(move || worker.probe(Path::new("unused")));
-        started.recv_timeout(Duration::from_secs(2)).unwrap();
-        {
-            let mut cache = ai.probe.lock().unwrap();
-            cache.0 += 1;
-            cache.1 = None;
+        for result in [
+            Err("offline".into()),
+            Ok(vec![
+                json!({"provider":"codex","error":{"message":"offline"}}),
+            ]),
+        ] {
+            ai.probe.lock().unwrap().attempted = None;
+            assert_eq!(
+                ai.probe(Path::new("unused"), &providers, &dump, false).2["status"],
+                "refreshing"
+            );
+            started.recv_timeout(Duration::from_secs(2)).unwrap();
+            release.send(result).unwrap();
+            changes.recv_timeout(Duration::from_secs(2)).unwrap();
+            let (updated, usage, state) = ai.probe(Path::new("unused"), &providers, &dump, false);
+            assert_eq!(updated.as_deref(), Some("previous"));
+            assert_eq!(usage[0]["usage"], quota);
+            assert_eq!(usage[0]["error"]["message"], "offline");
+            assert_eq!(
+                state,
+                json!({"status":"failed","error":"AI usage could not be read."})
+            );
+            assert!(
+                started.try_recv().is_err(),
+                "failed probes must back off for the TTL"
+            );
+            assert!(changes.try_recv().is_err());
         }
-        release.send(()).unwrap();
-        probe.join().unwrap().unwrap();
-        assert!(ai.probe.lock().unwrap().1.is_none());
+    }
+
+    #[test]
+    fn partial_failure_is_ready_and_errors_are_bounded_on_tracked_rows() {
+        for (all_failed, claude_failed) in [(false, true), (true, true), (false, false)] {
+            let root = tempfile::tempdir().unwrap();
+            let mut ai = Ai::new(root.path().join("ai.toml"), root.path().join("models.json"));
+            let (providers, dump) = tracked_providers(&["codex", "claude", "irrelevant"]);
+            let mut dump = dump[..2].to_vec();
+            for entry in &mut dump {
+                entry["apiKey"] = json!("[REDACTED]");
+            }
+            let dump = &dump;
+            ai.run_probe = Box::new(move |_, id| {
+                if (id == "codex" && !all_failed) || (id == "claude" && !claude_failed) {
+                    Ok(vec![json!({"provider":id,"usage":{}})])
+                } else {
+                    Err("offline\n".repeat(100))
+                }
+            });
+            let (changed, changes) = mpsc::channel();
+            ai.set_notifier(changed);
+            let ai = Arc::new(ai);
+            ai.probe(Path::new("unused"), &providers, dump, true);
+            // Relevant rows publish before discovery completes, then the full result.
+            changes.recv_timeout(Duration::from_secs(2)).unwrap();
+            changes.recv_timeout(Duration::from_secs(2)).unwrap();
+            let (_, usage, state) = ai.probe(Path::new("unused"), &providers, dump, true);
+            assert_eq!(state["status"], if all_failed { "failed" } else { "ready" });
+            let (visible, catalog) = build(&Inputs {
+                providers: &providers,
+                dump,
+                usage: &usage,
+                custom: &[],
+                models_dev: None,
+            });
+            assert_eq!(visible.len(), 2);
+            let claude = visible.iter().find(|row| row["id"] == "claude").unwrap();
+            if claude_failed {
+                let error = claude["usageError"].as_str().unwrap();
+                assert_eq!(error.chars().count(), 200);
+                assert!(!error.contains('\n'));
+            } else {
+                assert!(claude["usageError"].is_null());
+            }
+            let summary = summarize_usage(state, &visible);
+            assert_eq!(
+                summary["error"],
+                if all_failed {
+                    json!("Usage could not be read for 2 tracked providers.")
+                } else if claude_failed {
+                    json!("Usage could not be read for 1 tracked provider.")
+                } else {
+                    Value::Null
+                }
+            );
+            assert!(catalog.iter().all(|row| row["usageError"].is_null()));
+            assert_eq!(
+                visible.iter().find(|row| row["id"] == "codex").unwrap()["usageError"].is_null(),
+                !all_failed
+            );
+        }
+    }
+
+    #[test]
+    fn probe_concurrency_is_bounded_and_relevant_rows_publish_before_discovery() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let root = tempfile::tempdir().unwrap();
+        let mut ai = Ai::new(root.path().join("ai.toml"), root.path().join("models.json"));
+        let ids: Vec<_> = (0..24).map(|i| format!("provider{i}")).collect();
+        let (providers, dump) =
+            tracked_providers(&ids.iter().map(String::as_str).collect::<Vec<_>>());
+        let dump = &dump[..1];
+        let active = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (entered, started) = mpsc::channel();
+        let (release, wait) = mpsc::channel();
+        let wait = Arc::new(Mutex::new(wait));
+        let counter = active.clone();
+        let maximum = peak.clone();
+        let recorded = calls.clone();
+        ai.run_probe = Box::new(move |_, id| {
+            recorded.lock().unwrap().push(id.to_owned());
+            let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            maximum.fetch_max(count, Ordering::SeqCst);
+            if id != "provider0" {
+                entered.send(()).unwrap();
+                wait.lock().unwrap().recv().unwrap();
+            }
+            counter.fetch_sub(1, Ordering::SeqCst);
+            Ok(vec![json!({"provider":id,"usage":{}})])
+        });
+        let (changed, changes) = mpsc::channel();
+        ai.set_notifier(changed);
+        let ai = Arc::new(ai);
+        ai.probe(Path::new("unused"), &providers, dump, true);
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            ai.probe.lock().unwrap().value.as_ref().unwrap().usage.len(),
+            1
+        );
+        for _ in 0..5 {
+            started.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        assert_eq!(active.load(Ordering::SeqCst), 5);
+        assert!(started.try_recv().is_err());
+        for _ in 1..ids.len() {
+            release.send(()).unwrap();
+        }
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert!(peak.load(Ordering::SeqCst) <= 6);
+        assert_eq!(calls.lock().unwrap().len(), ids.len());
+        // Invalidation refreshes known usage but cannot repeat full discovery within TTL.
+        ai.probe.lock().unwrap().invalidate();
+        ai.probe
+            .lock()
+            .unwrap()
+            .value
+            .as_mut()
+            .unwrap()
+            .usage
+            .truncate(1);
+        calls.lock().unwrap().clear();
+        ai.probe(Path::new("unused"), &providers, dump, true);
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(*calls.lock().unwrap(), vec!["provider0"]);
+        // Once the full-probe TTL expires, discovery runs after the subset again.
+        ai.probe.lock().unwrap().full_attempted = Some(Instant::now() - TTL);
+        ai.probe.lock().unwrap().attempted = None;
+        ai.probe(Path::new("unused"), &providers, dump, true);
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        for _ in 0..5 {
+            started.recv_timeout(Duration::from_secs(2)).unwrap();
+        }
+        for _ in 1..ids.len() {
+            release.send(()).unwrap();
+        }
+        changes.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(calls.lock().unwrap().len(), ids.len() + 1);
+        assert!(peak.load(Ordering::SeqCst) <= 6);
     }
 
     #[test]

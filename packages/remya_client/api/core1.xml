@@ -1,5 +1,10 @@
 <node>
-  <!-- AI: Get ai.providers returns {codexbar,updatedAt,providers,catalog}.
+  <!-- AI: Get ai.providers returns {codexbar,updatedAt,usage:{status,error},providers,catalog}.
+       Usage refreshes asynchronously with at most 6 CodexBar processes (5 usage, 1 config/version) and emits Changed
+       after relevant providers, then automatic discovery (at most once per 5 minutes).
+       status is ready if any probe succeeded, failed only if none did or probing could
+       not run; error is a short summary. Visible rows expose nullable usageError
+       (one line, at most 200 characters); catalog/hidden rows expose no probe errors.
        Get ai.provider/<id> returns {provider,usage,modelsDev}.
        Set ai.providers {id,enabled?,source?}, ai.credential {id,apiKey|cookie|clear}
        and ai.custom {add}|{remove} return ai.providers and emit Changed for

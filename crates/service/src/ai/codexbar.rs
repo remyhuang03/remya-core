@@ -9,6 +9,11 @@ use std::{
     time::{Duration, Instant},
 };
 
+// Reserve one of the six process slots for serialized config/version reads so
+// cached Gets never queue behind slow usage probes.
+const USAGE_WORKERS: usize = 5;
+static CONTROL: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn config_path() -> Result<PathBuf, String> {
     let home = env::var_os("HOME")
         .map(PathBuf::from)
@@ -93,10 +98,11 @@ fn run(path: &Path, args: &[&str], stdin: Option<&str>) -> Result<Output, String
     })
 }
 
-/// Long enough for the all-provider usage probe, short enough not to wedge the service.
+/// Each provider has its own deadline so a slow provider cannot block the others.
 const TIMEOUT: Duration = Duration::from_secs(45);
 
 fn cli_with(path: &Path, args: &[&str], stdin: Option<&str>) -> Result<Value, String> {
+    let _control = CONTROL.lock().unwrap();
     let output = run(path, &[args, &["--format", "json"]].concat(), stdin)?;
     if !output.status.success() {
         return Err("Unavailable:CodexBar could not read or update its configuration.".into());
@@ -115,6 +121,7 @@ pub fn cli_stdin(path: &Path, args: &[&str], secret: &str) -> Result<Value, Stri
 
 /// `None` when the codexbar executable is missing.
 pub fn version() -> Result<Option<String>, String> {
+    let _control = CONTROL.lock().unwrap();
     match Command::new("codexbar")
         .arg("--version")
         .stdin(Stdio::null())
@@ -131,18 +138,48 @@ pub fn version() -> Result<Option<String>, String> {
     }
 }
 
-/// The usage probe exits non-zero when any provider fails, but still prints
-/// one JSON row per provider.
-pub fn probe(path: &Path) -> Result<Vec<Value>, String> {
-    let output = run(
-        path,
-        &["usage", "--provider", "all", "--format", "json"],
-        None,
-    )?;
+pub fn provider_usage(path: &Path, id: &str) -> Result<Vec<Value>, String> {
+    // Non-zero exits still carry the same JSON rows, including provider errors.
+    let output = run(path, &["usage", "--provider", id, "--format", "json"], None)?;
     serde_json::from_slice::<Value>(&output.stdout)
         .ok()
         .and_then(|rows| rows.as_array().cloned())
+        .filter(|rows| !rows.is_empty() && rows.iter().all(|row| row["provider"] == id))
         .ok_or_else(|| "Unavailable:Invalid CodexBar usage response.".into())
+}
+
+/// Keep the process budget shared by the entire batch, including slow providers.
+pub fn probe(path: &Path, ids: &[String], run_probe: &super::RunProbe) -> Vec<Value> {
+    let pending = std::sync::Mutex::new(ids.iter());
+    std::thread::scope(|scope| {
+        let workers: Vec<_> = (0..ids.len().min(USAGE_WORKERS))
+            .map(|_| {
+                let pending = &pending;
+                scope.spawn(move || {
+                    let mut rows = Vec::new();
+                    loop {
+                        let Some(id) = pending.lock().unwrap().next() else {
+                            break;
+                        };
+                        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            run_probe(path, id)
+                        }))
+                        .unwrap_or_else(|_| Err("Unavailable:CodexBar probe panicked.".into()));
+                        match result {
+                            Ok(result) => rows.extend(result),
+                            Err(error) => rows.push(json!({"provider":id,
+                                "error":{"kind":"provider","message":error}})),
+                        }
+                    }
+                    rows
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap())
+            .collect()
+    })
 }
 
 pub fn configured(path: &Path) -> Result<bool, String> {
