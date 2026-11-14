@@ -1,7 +1,7 @@
 # Printers
 
 Devices › Printers manages CUPS print queues with the CUPS command-line tools,
-run by the Rust crate `lib/src/rust/printers/` in the C locale behind a `Cups`
+run by the Rust crate `crates/printers/` in the C locale behind a `Cups`
 trait (faked in its unit tests). Interface details are in
 [public API](public-api.md#printers).
 

@@ -4,7 +4,7 @@ Research date: 2026-10-26. Baseline: commit `44679b271497c40a0d37dd40299f89ae59c
 
 The retained extension has no category of its own: its **303 controls** live on ordinary pages, and three pages (Window appearance, Animations and Input capture) were added for it. Coverage files describe the currently included controls and their owning pages.
 
-Controls marked `available` use the Settings service and the Settings-owned Lua files described in [Input devices and shortcuts](input.md) and [Public interfaces](public-api.md). Every other addition is `planned`: it stays disabled, and nothing is read or modified for it. Optional components are named in each page's availability reason; their presence and compatibility are not detected.
+Controls marked `available` use Core and the managed Lua files described in [Input devices and shortcuts](input.md) and [Public interfaces](public-api.md). Every other addition is `planned`: it stays disabled, and nothing is read or modified for it. Optional components are named in each page's availability reason; their presence and compatibility are not detected.
 
 ## Reference versions
 
@@ -48,11 +48,12 @@ Documented boolean fields use disabled switches. Bounded numeric fields use the 
 
 ## Evidence and preservation checks
 
-- `assets/settings/catalog.json`: current categories, sources and pages, with related compositor previews grouped in the owning ordinary page's collapsed Advanced section.
+- `assets/catalog.json`: current categories, sources and pages, with related compositor previews grouped in the owning ordinary page's collapsed Advanced section.
 - `docs/hyprland-settings-coverage.json`: baseline IDs, inspected repository revisions, file permalinks, remaining standalone page IDs, and one source mapping for every added control, including folded controls. Native types/defaults/limits are recorded for table-derived fields.
-- `test/catalog_test.dart`: retained baseline identities, source mapping integrity, coverage of current source fields, searchable additions, unavailable previews, and coverage parity.
 
-Catalog tests validate current category/page/control identities and source mappings. Rendering tests exercise the enlarged catalog at wide, compact, and narrow widths; asset/schema validation and a Linux build check that the generic renderer accepts every added page.
+The catalog is owned by Core. Service parity tests check bounded catalog access,
+coverage totals and unavailable operations. GUI catalog-loader tests in Settings
+check lazy loading, invalidation, failed-read retention and app handoff.
 
 ## Implementation boundaries for later work
 

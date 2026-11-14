@@ -13,8 +13,9 @@ Devices refresh every two seconds while the page is open, and through the
 service's normal 30-second refresh. A failed read retains the last readout and
 disables controls. Operation failures remain visible after automatic refreshes.
 
-The service records actual values on first use in cameras.toml next to its main
-configuration, using atomic writes. Startup/page reads retain saved and actual
+Unmanaged reads observe actual values without saving. Manage, Set or Resolve
+starts management, atomically storing `cameras.toml` under the
+[system configuration root](xdg-layout.md). Startup/page reads retain saved and actual
 values and report per-camera conflicts. Resolve adopts actual values or applies
 saved values with validation/readback. Missing devices retain saved preferences;
 they are never automatically restored. Failed writes or persistence retain the
@@ -62,6 +63,6 @@ On this workstation both the HP normal and IR sources produced 640x480 frames;
 the normal source's four parameter writes/restoration passed. IR has no exposed
 image adjustment controls. No unplug/replug operation was performed on hardware.
 
-Private-bus smoke tests (`python test/camera_smoke.py debug|release`) verify
+Private-bus smoke tests (`python tests/camera_smoke.py debug|release`) verify
 CLI/D-Bus state parity, first-use initialization without cameras, read-only
 inventory, rejected stale/malformed operations, and deleted-page rejection.

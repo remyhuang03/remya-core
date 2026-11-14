@@ -2,7 +2,7 @@
 
 The Cursor page (Appearance) and the Icons section of Colors and themes choose
 the cursor theme, cursor size and icon theme, and add or remove theme packs.
-The backend is `lib/src/rust/appearance/src/packs.rs`; the service feature is
+The backend is `crates/appearance/src/packs.rs`; the service feature is
 `themes`. Hiding and pointer-movement options on the Cursor page are Hyprland
 options in the `desktop` group; see [Input devices and shortcuts](input.md).
 
@@ -62,10 +62,10 @@ Running applications may keep their previous cursor or icons until they restart.
 
 ## Reconciliation
 
-`themes.toml` beside `config.toml` keeps `cursor_theme`, `cursor_size` and
-`icon_theme`. On first use it is filled from GNOME settings and nothing is
-written. Later reads compare it with GNOME settings, the store GTK and Hyprland
-follow. A difference is a conflict: `Resolve themes system` adopts the system
+`themes.toml` under the [system configuration root](xdg-layout.md) keeps
+`cursor_theme`, `cursor_size` and `icon_theme`. Unmanaged reads follow GNOME
+settings without saving. Manage, Set or Resolve starts management; later reads
+compare saved values with GNOME settings, the store GTK and Hyprland follow. A difference is a conflict: `Resolve themes system` adopts the system
 values, `Resolve themes settings` applies the saved ones to every target.
 
 A login script that sets the cursor itself, such as `hyprctl setcursor` in an
@@ -100,9 +100,9 @@ outside the user folder never can. The GUI asks for confirmation first.
 
 Verification:
 
-- `cargo test -p remya_settings_appearance --no-default-features` (discovery,
+- `cargo test -p remya_appearance --no-default-features` (discovery,
   precedence, previews, installation, archives, every apply target and rollback
   with in-memory GNOME settings)
-- `test/multitasking_cursor_test.dart`
-- `test/desktop_smoke.py`, which runs the service against a nested Hyprland with
+- `../../remya-settings/test/multitasking_cursor_test.dart`
+- `tests/desktop_smoke.py`, which runs the service against a nested Hyprland with
   isolated XDG roots, home and GNOME settings

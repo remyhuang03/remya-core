@@ -1,8 +1,8 @@
 # Power and energy saver
 
-The resident Rust service owns `power.json` and `power.runtime.json` beside the
-ordinary Settings configuration. Flutter, CLI and session D-Bus use the same
-controller. No privileged helper or legacy PowerProfiles interface is used.
+Core owns `power.json` and `power.runtime.json` under the system root in the
+[XDG layout](xdg-layout.md). GUI clients, CLI and session D-Bus use the same
+backend. No privileged helper or legacy PowerProfiles interface is used.
 
 PowerProfiles is required at `org.freedesktop.UPower.PowerProfiles`, object
 `/org/freedesktop/UPower/PowerProfiles`. Available profiles come from `Profiles`;
@@ -34,8 +34,8 @@ through its user unit.
 
 Keep awake holds a session D-Bus idle inhibitor while enabled. It requires
 hypridle to own `org.freedesktop.ScreenSaver` with D-Bus inhibition enabled.
-It pauses hypridle listeners that honor inhibition. The Settings service owns
-the cookie, so closing Settings or Bar leaves it active. Stopping Settings
+It pauses hypridle listeners that honor inhibition. Core owns
+the cookie, so closing Settings or Bar leaves it active. Stopping Core
 or hypridle releases it. Keep awake creates no files and starts disabled.
 
 Automatic energy saver defaults to off. Thresholds are 10, 20, 30, 50 and 100
@@ -79,48 +79,21 @@ History queries return raw events plus preceding state/session/battery context f
 
 ## Public operations
 
-- `Get power` / `Get battery-saver`: saved/system values, supported profiles,
-  conflict, backend error and history error.
-- `Set power.idle-daemon start`: ensure hypridle is running for the graphical
-  session and return `{"running":true}` on success.
-- `Get power.keep-awake` / `Set power.keep-awake`: live inhibitor state and
-  a JSON boolean write. Successful writes emit `Changed power.keep-awake`.
-- `Set power.743773bd open` / `Set power.03bd05ee open`: open Energy saver or
-  Battery usage.
-- `Set power.5a4f0131`: JSON profile string.
-- `Set power.5e3af39c` / `power.8b4c8522` / `power.lock-after`: JSON seconds,
-  0 (Never) to 86400, for screen off, sleep and lock.
-- `Set power.lock-before-sleep`: JSON boolean.
-- Display wake (`power.wake-key`, `power.wake-pointer`) belongs to the `desktop`
-  Hyprland options; see the public API.
-- `Set battery-saver.743773bd`: JSON manual saver boolean.
-- `Set battery-saver.9b0caf70`: JSON threshold 0, 10, 20, 30, 50 or 100.
-  A JSON boolean supports a switch for the same setting. False selects Never
-  (0). True keeps the current nonzero threshold or restores the last nonzero
-  threshold, defaulting to 20% on first use.
-- `Get battery-saver.off-threshold` / `Set battery-saver.off-threshold`: saved
-  `off_threshold` as a JSON integer. Use -1 to follow the turn-on threshold,
-  0 for Never, or 30, 50, 70, 80, 90 or 100 for a separate turn-off percentage.
-  Percentage-based activation requires a higher turn-off percentage.
-- `Set battery-saver.power-source`: JSON include-external-power boolean.
-- `Set battery-saver.07945503`: JSON dimming boolean.
-- `Resolve power system|settings`: reconcile real preferences explicitly.
-- `Get battery-history:{"from":0,"to":1794000000,"after":0,"limit":1000}`:
-  inclusive Unix timestamp range, insertion-ID cursor, maximum 1000 rows.
-  Response has `observations` and `next` (last ID, null for an empty page).
-- `Changed power`: state invalidation. Dart exposes `PowerClient` methods.
+See the canonical [Power API](public-api.md#power) and
+[live display controls](public-api.md#live-display-controls) for payloads,
+history queries and change notifications.
 
 ## Verification
 
-`cargo test -p remya_settings_power -p remya_settings_service` covers storage,
+`cargo test -p remya_power -p remya_service` covers storage,
 policy predicates, safe timeout transformations and service dispatch.
-`cargo run -p remya_settings_power --example probe -- <isolated-dir> <hypridle.conf>`
+`cargo run -p remya_power --example probe -- <isolated-dir> <hypridle.conf>`
 is read-only for host settings. Add `exercise` to switch profiles, exercise the
 automatic include-AC policy and built-in dimming, restoring the starting profile.
 This workstation passed that roundtrip on 2026-11-04, and the first SQLite sample
 was read back at 96 percent with external power. The hypridle timeout/restart roundtrip also passed and restored the original file byte-for-byte; on 2026-11-09 it also changed the lock timeout and toggled lock before sleep on the live configuration before restoring it. Real suspend/resume and actual
 idle timeout expiry require separate desktop verification.
 
-On a running Hyprland session, `dbus-run-session -- python test/power_interface_smoke.py --with-hypridle`
+On a running Hyprland session, `dbus-run-session -- python tests/power_interface_smoke.py --with-hypridle`
 checks CLI/D-Bus parity and the inhibitor lifecycle using a temporary hypridle
 configuration with harmless listeners.

@@ -106,7 +106,7 @@ No command evaluates shell input. IDs are stable catalog IDs, not translated lab
 
 `Open` also accepts `home`, `about`, `licenses`, and `repository` (the fixed project URL).
 `Get("catalog")` returns page
-summaries; request each `page:<id>` for the complete original page metadata. This
+summaries and `coverage` (`supported`, `planned` and `total` control counts over the whole catalog); request each `page:<id>` for the complete original page metadata. This
 keeps individual D-Bus replies bounded instead of sending the entire 1.3 MB catalog
 in one message. `List` starts with cursor `"0"` and returns up to 32 controls,
 `api_version: 1`, and `next_cursor`. Continue until `next_cursor` is `null`. CLI
@@ -440,7 +440,7 @@ outputs report a `reason`. Brightness is read when the page opens, not while pol
 because DDC/CI is slow.
 
 `cargo test -p remya_display` covers parsing, validation, reconciliation,
-confirmation, and failures against a fake compositor. `test/display_test.dart` covers
+confirmation, and failures against a fake compositor. `../../remya-settings/test/display_test.dart` covers
 the controller and page. `python tests/display_smoke.py` runs the real service against
 a nested Hyprland with headless outputs, a private bus, and isolated XDG roots.
 
@@ -915,10 +915,11 @@ state ownership and the explicit hardware verification limits.
 | `get your-info.58484bbb` | `Get(id)` | Saved Settings avatar path and the same account state |
 | `set your-info.58484bbb <json>` | `Set(id, json)` | Updated account state after atomic avatar persistence |
 
-Avatar JSON is `{"path":"/absolute/image.png","crop":{"left":0,"top":0,"right":1,"bottom":1}}`. Crop edges are finite normalized coordinates in the source image after EXIF orientation; require `0 <= left < right <= 1` and `0 <= top < bottom <= 1`. PNG, JPEG and WebP input is bounded to 32 MiB, 64 megapixels and 16,384 pixels per side. The ordinary-user Rust service decodes, crops and resizes with system GdkPixbuf and saves a 512 × 512 PNG beside its configuration. No source image is changed or retained. Invalid input, unsupported decoding and failed persistence leave the last saved avatar intact. Avatar destination symlinks are rejected.
+Avatar JSON is `{"path":"/absolute/image.png","crop":{"left":0,"top":0,"right":1,"bottom":1}}`. Crop edges are finite normalized coordinates in the source image after EXIF orientation; require `0 <= left < right <= 1` and `0 <= top < bottom <= 1`. PNG, JPEG and WebP input is bounded to 32 MiB, 64 megapixels and 16,384 pixels per side. The ordinary-user Rust service decodes, crops and resizes with system GdkPixbuf and saves a 512 × 512 PNG at the system-root `avatar.png` (see [XDG layout](xdg-layout.md)). No source image is changed or retained. Invalid input, unsupported decoding and failed persistence leave the last saved avatar intact. Avatar destination symlinks are rejected.
 
 
-The GUI uses the MIT-licensed Croppy crop component with its public pure-Dart Cassowary solver option. A small Flutter input adapter sends drag, pinch, vertical mouse wheel and slider changes through the same public controller and square crop rectangle, with 1–8× zoom. Scrolling up zooms in; scrolling down zooms out. The package's native asset is still built and bundled, and its Kiwi/Loki notices are retained, but avatar geometry does not depend on loading that native library. The service continues to own decoding and saved output.
+GUI cropping and input behavior are documented in the
+[Settings client](../../remya-settings/docs/gui-client.md#avatar-editor).
 
 Username rejects Set with ReadOnly. `Changed("account-information", state)` reports avatar changes through the same versioned interface; `AccountInformationClient` supplies pure Dart helpers. The avatar is app-owned data: it has no system counterpart, reconciliation or elevation, does not change a desktop/account picture, and does not enable login. Manage Account and Login options remain unavailable previews.
 
@@ -976,7 +977,7 @@ boundaries.
 | `set active-hours.e8868af6 HH:mm` | `Set(id, value)` | Active hours start; saved local time, must differ from the end |
 | `set active-hours.a0bb9f49 HH:mm` | `Set(id, value)` | Active hours end; automatic updates start when it is reached |
 
-`updates.status` and `updates.output` reject Set with `ReadOnly`. A second check or upgrade while busy returns `Busy`. `Changed("updates", state)` is published at most once a second while anything changes. Quit returns `Busy` while an update runs. Upgrades never use the GUI-authorized privileged helper: the service runs `pkexec /usr/local/libexec/remya-settings-update upgrade [--include-held]`, which is allowed without a password only by the polkit rule from `tool/install_system_updater.py`. The Dart `UpdatesClient` exposes every operation above. See [System updates](updates.md).
+`updates.status` and `updates.output` reject Set with `ReadOnly`. A second check or upgrade while busy returns `Busy`. `Changed("updates", state)` is published at most once a second while anything changes. Quit returns `Busy` while an update runs. Upgrades never use the GUI-authorized privileged helper: remyad runs `pkexec <updater> upgrade [--include-held]`, where `<updater>` is the packaged `/usr/lib/remya-core/remya-core-update` (polkit rule for `wheel`) or, for source installs, `/usr/local/libexec/remya-core-update` (per-user rule from `tool/install_system_updater.py`). The Dart `UpdatesClient` exposes every operation above. See [System updates](updates.md).
 
 ## Cameras
 
@@ -1321,11 +1322,12 @@ use `readAi`, `readAiProvider`, `setAiProvider`, `setAiCredential`,
 {"id":"ai.providers","availability":"available","value":{
   "codexbar":{"available":true,"version":"0.84.0"},
   "updatedAt":"2026-11-11T05:39:35Z",
+  "usage":{"status":"ready","error":null},
   "providers":[{"id":"claude","name":"Claude","kind":"codexbar","status":"ready",
     "enabled":true,"source":"oauth","plan":"Claude Pro",
     "sourceModes":["api","auto","cli","oauth","web"],
     "credential":{"apiKey":true,"cookie":true,"configured":false},
-    "envVars":["ANTHROPIC_ADMIN_KEY"],"error":null,"baseUrl":null,"modelsDev":"anthropic",
+    "envVars":["ANTHROPIC_ADMIN_KEY"],"error":null,"usageError":null,"baseUrl":null,"modelsDev":"anthropic",
     "windows":[{"slot":"primary","label":"Session","windowMinutes":300,
       "usedPercent":22.0,"resetsAt":"2026-11-11T09:20:00Z"}]}],
   "catalog":[
@@ -1335,15 +1337,42 @@ use `readAi`, `readAiProvider`, `setAiProvider`, `setAiCredential`,
      "baseUrl":"https://api.groq.com/openai/v1","modelsDev":"groq"}]}}
 ```
 
-- `updatedAt` is the UTC time of the usage probe
-  `codexbar usage --provider all --format json`. The probe is cached in memory
-  for 5 minutes and dropped by every successful `ai.providers`,
-  `ai.credential` and `ai.custom` Set.
-- `status` is `ready` when the probe returned usage. A provider with a
-  credential in `codexbar config dump` (API key, cookie header or token
-  accounts) is visible as `error` (with the probe's `error` message) when the
-  probe failed, or `needs-setup` when the probe returned no row. Custom
-  endpoints are always visible with `status: "custom"` and `kind: "custom"`.
+- Reads return the last usage immediately (or no usage on first read); they
+  never wait for a usage probe. `updatedAt` is the UTC time of the last
+  successful usage refresh, or null before one succeeds.
+- `usage.status` is `refreshing` while a background probe runs, `ready`
+  when at least one provider returned usage, and `failed` only when none
+  succeeded or the probe could not run. `usage.error` is null or a short
+  human summary, such as `Usage could not be read for 3 tracked providers.`;
+  it never concatenates provider diagnostics. Failures of invisible providers
+  do not contribute to that summary. If no probe succeeds and no visible row
+  has an error, the summary is `AI usage could not be read.`
+- A visible provider's nullable `usageError` contains its latest probe failure
+  as one line of at most 200 characters. Catalog and hidden providers do not
+  expose probe errors. A failed refresh keeps the last successful quota and
+  its new `usageError`; global status still reflects the current probe, not
+  the retained quota. Successful reads clear that provider's error.
+- Successes and failures are cached for 5 minutes; concurrent reads start at
+  most one worker. A successful `ai.providers`, `ai.credential` or `ai.custom`
+  Set invalidates the refresh backoff while retaining prior quotas and the
+  automatic full-probe deadline. Results started before invalidation are
+  discarded and the next read starts a refresh for the new configuration.
+- The worker runs `codexbar usage --provider <id> --format json` for enabled
+  providers with at most 6 CodexBar processes at once: 5 usage workers and
+  one reserved slot for serialized config/version commands so reads stay fast.
+  Usage processes each have a 45 s timeout. The worker first refreshes relevant
+  providers: configured credentials, enabled entries in an explicit CodexBar configuration, or prior successful usage.
+  It publishes these rows with `Changed("ai.providers", <current Get reply>)`
+  before starting any discovery. In automatic mode (no configuration file),
+  the remaining enabled defaults are probed at most once per 5-minute TTL,
+  including the first full probe. Other refreshes probe only the relevant
+  subset. Discovery completion also emits Changed, including on failure.
+- Provider `status` is `ready` when usage is available. A provider with a
+  configured API key, cookie header or token accounts is visible as `error`
+  (with a short `error` message) when its first probe failed, or `needs-setup`
+  before usage arrives.
+  Custom endpoints are always visible with `status: "custom"`,
+  `kind: "custom"` and `usageError: null`.
 - Other CodexBar providers are listed in `catalog`, except probe failures of
   `kind: "runtime"` for providers that accept neither an API key nor a cookie
   (macOS-only sources and similar), which are omitted.
@@ -1356,8 +1385,8 @@ use `readAi`, `readAiProvider`, `setAiProvider`, `setAiCredential`,
   windows that report `usedPercent`. `label` is CodexBar's
   `rateWindowLabels[slot]`, else `5h`-style hours, `Day` or `Week` derived
   from `windowMinutes`, else null. It is empty without usage.
-- `enabled` is true for every provider while CodexBar has no configuration
-  file (default tracking of all providers).
+- `enabled` reflects CodexBar's enabled flag, including its defaults when no
+  configuration file exists.
 - Every key ending in `email` (such as `accountEmail`) is removed at any
   depth. Secrets never appear in replies.
 - Without the `codexbar` executable, `codexbar.available` is false,
@@ -1367,17 +1396,22 @@ use `readAi`, `readAiProvider`, `setAiProvider`, `setAiCredential`,
 
 `<id>` is any `providers` or `catalog` id. The value is
 `{provider, usage, modelsDev}`: `provider` is the row above, `usage` is the
-sanitized CodexBar probe row or null, and `modelsDev` is
+sanitized CodexBar probe row for a visible provider or null (including catalog
+providers); error messages are bounded to the same 200-character line. `modelsDev` is
 `{status, provider, models}`. `status` is `fresh`, `stale` (a cached copy
 served after a failed refresh) or `unavailable` (no cache and no network).
 `provider` is `{id,name,doc,api,env,npm}` or null and `models` lists
 `{id,name,context,output,input_cost,output_cost,reasoning,tool_call,release_date}`,
-newest first. `https://models.dev/api.json` is fetched with a 10 s timeout
-when the cache is older than 24 hours. Unknown ids fail with `InvalidArgument`.
+newest first. `https://models.dev/api.json` is fetched in the background with
+a 10 s timeout when the disk cache is older than 24 hours. Reads serve the
+existing fresh/stale cache or unavailable state without waiting for the
+network. Refreshes are single-flight, checked at most once per 5 minutes,
+and emit `Changed("ai.providers", <current Get reply>)` on completion.
+Unknown ids fail with `InvalidArgument`.
 
 ### Set operations
 
-Each successful Set returns the fresh `ai.providers` Get reply and emits
+Each successful Set returns the current `ai.providers` Get reply and emits
 `Changed` for its own id and for `ai.providers`. Invalid payloads fail with
 `InvalidArgument`; CodexBar, Secret Service or readback failures fail with
 `Unavailable` and leave the previous state.

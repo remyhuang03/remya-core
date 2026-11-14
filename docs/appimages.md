@@ -4,7 +4,7 @@ Apps > AppImages manages AppImage applications kept in one folder, `$HOME/AppIma
 
 ## What it does
 
-- **Install** copies a chosen `.AppImage` into the folder as `<Name>.AppImage`, where `Name` comes from the image's desktop entry. The original file stays where it was. Opening an AppImage from a file manager uses the hidden `top.remya.settings.appimage.desktop` handler (`remya_settings install-appimage <path>`). The handler installs the file and opens this page.
+- **Install** copies a chosen `.AppImage` into the folder as `<Name>.AppImage`, where `Name` comes from the image's desktop entry. The original file stays where it was. Opening an AppImage from a file manager uses the hidden `top.remya.settings.appimage.desktop` handler (`remya install-appimage <path>`). The handler installs the file and opens this page.
 - **Launcher integration** writes `$XDG_DATA_HOME/applications/<id>.desktop` and an icon under `$XDG_DATA_HOME/icons/`. Only standard descriptive keys (`Name`, `GenericName`, `Comment`, `Categories`, `Keywords`, `MimeType`, `StartupWMClass`, `StartupNotify`, `Terminal`, `OnlyShowIn`, `NotShowIn`, `PrefersNonDefaultGPU`, `SingleMainWindow`, their translations) and `X-` extensions come from the image. `Exec`, `TryExec`, actions and other keys never do: `Exec` is always `env DESKTOPINTEGRATION=1 "<path>"` plus the image's file field code. The launcher is the visible (`NoDisplay` not `true`) entry that runs the image; hidden handlers an application registers for itself are left alone. An ID already used by another user entry or by `/usr/share/applications` falls back to `appimage-<name>.desktop`.
 - **Update sources** are resolved in this order:
   1. a source the user saved;
@@ -32,7 +32,7 @@ Every request uses https through `ureq` with `https_only`, including redirects a
 
 ## Preferences
 
-`appimages.toml`, beside `config.toml`, stores `auto_check`, `auto_update`, `last_check` (epoch seconds) and the per-app `source` / `updates_disabled` choices. It is written atomically. A malformed file is reported and never overwritten. These are app-owned preferences with no system counterpart, so there is nothing to reconcile.
+`appimages.toml`, under the [system configuration root](xdg-layout.md), stores `auto_check`, `auto_update`, `last_check` (epoch seconds) and the per-app `source` / `updates_disabled` choices. It is written atomically. A malformed file is reported and never overwritten. These are Core-owned update preferences with no external system counterpart to reconcile.
 
 ## References and reused work
 
@@ -53,8 +53,8 @@ The feature scope follows [AppManager](https://github.com/kem-a/AppManager) at t
   - payload link confinement;
   - desktop entry rendering that drops image commands and quotes paths;
   - preference persistence, damaged-file retention, request validation, automatic-check spacing and icon-removal confinement.
-- `test/service_controllers_test.dart` covers live progress state and visible rejected writes. `test/application_lists_test.dart` covers readable byte units, colored metadata tags, icon progress rings, indeterminate stages and cancellation.
-- `test/interface_smoke.py` runs against the installed bundles with isolated XDG roots. It uses a real GridCraft release with 64 KiB zeroed. It installs through `install-appimage`, then checks:
+- `../../remya-settings/test/service_controllers_test.dart` covers live progress state and visible rejected writes. `../../remya-settings/test/application_lists_test.dart` covers byte units, progress, indeterminate stages and cancellation.
+- `tests/interface_smoke.py` runs against the installed bundles with isolated XDG roots. It uses a real GridCraft release with 64 KiB zeroed. It installs through `install-appimage`, then checks:
   - the launcher with `desktop-file-validate`;
   - source changes over the CLI and over D-Bus;
   - a real zsync delta update with live progress and `Changed` signals;

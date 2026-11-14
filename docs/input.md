@@ -2,7 +2,7 @@
 
 The Mouse, Touchpad and Keyboard shortcuts pages (Bluetooth & devices) configure
 Hyprland 0.57 or later with a Lua configuration. The backend is the
-`remya_settings_input` crate in `lib/src/rust/input/`. The keyboard shortcuts
+`remya_input` crate in `crates/input/`. The keyboard shortcuts
 work entirely through Hyprland key bindings, but the interface does not present
 them as a Hyprland feature.
 
@@ -51,7 +51,7 @@ A change is applied in four steps:
 1. `hyprctl eval 'hl.config({ … })'`, which Hyprland validates.
 2. Readback through `descriptions`.
 3. A rewrite of the Settings-owned `$XDG_CONFIG_HOME/hypr/remya-settings/input.lua`.
-4. An update of the saved copy in `input.toml`, stored beside `config.toml`.
+4. An update of the saved copy in `input.toml`, stored under the [system configuration root](xdg-layout.md).
 
 The first write appends this managed block to the end of `hyprland.lua`:
 
@@ -81,8 +81,8 @@ is never overwritten. A missing `hyprland.lua` blocks writes in the same way.
 
 ## Reconciliation
 
-On first use, Settings saves the live option values and the shortcuts in
-`input.lua`, and changes nothing. An option added to a group later starts from
+Unmanaged reads observe live values without saving. Explicit Manage, Set or
+Resolve begins management as described in the [initialization contract](public-api.md#initialization-conflicts-and-scheduling). An option added to a group later starts from
 its live value the same way. Every later read compares:
 
 - saved options with live values (floating-point values to three decimals)
@@ -213,21 +213,6 @@ scratchpad workspace) and `workspaces` (`id`, `name`, `monitor`, `windows`,
 `persistent`). Rules from other files, such as a display tool's
 `workspaces.lua`, are shown read-only and never edited.
 
-## Visualizations
-
-| Page | What it shows |
-| --- | --- |
-| Mouse | The primary button and which way content moves when the wheel rolls toward you |
-| Touchpad | The right-click method (corner area or finger count), with a caption for tap mapping |
-| Keyboard shortcuts | A keyboard map. Modifier keys toggle the filter; keys with a shortcut are highlighted, and custom ones use the tertiary color. Selecting a free key offers to add a shortcut there. |
-| Workspaces | Displays at their layout positions and logical proportions, each with its open workspaces and the rule workspaces bound to it. The showing workspace is highlighted; selecting one edits its Settings rule or starts one. |
-
-Options that do not apply are hidden rather than disabled:
-
-- pointer refocus, unless focus follows the pointer
-- the tap options, unless tap-to-click is on
-- drag lock, unless tap-and-drag is on
-
 ## Boundaries
 
 Settings does not offer these features:
@@ -242,11 +227,11 @@ touchpads.
 
 Verification:
 
-- `cargo test -p remya_settings_input` (fake compositor)
-- `test/input_test.dart`
-- `test/input_smoke.py`, which runs the service against a nested Hyprland with
+- `cargo test -p remya_input` (fake compositor)
+- `../../remya-settings/test/input_test.dart`
+- `tests/input_smoke.py`, which runs the service against a nested Hyprland with
   isolated XDG roots
-- `test/desktop_smoke.py`, the same for the desktop group: Multitasking
+- `tests/desktop_smoke.py`, the same for the desktop group: Multitasking
   (including window groups, focus and full screen, and the Dwindle, Master and
   Scrolling layouts), Graphics, Window appearance, Animations, Workspaces and
   the System information compositor readouts. Each option is written, kept
