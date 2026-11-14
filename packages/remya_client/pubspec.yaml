@@ -1,7 +1,7 @@
 name: remya_client
 description: Pure Dart Remya Core client contracts for independently built Remya applications.
 publish_to: none
-version: 0.1.0-dev.20261113.0
+version: 0.1.0
 environment:
   sdk: ^3.13.7
 dependencies:

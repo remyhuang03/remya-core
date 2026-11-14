@@ -27,7 +27,8 @@ extension AiClient on SettingsClient {
   /// config/version command). Relevant providers refresh
   /// before automatic discovery (at most once per five minutes); each phase
   /// emits ai.providers Changed. Catalog providers expose no probe errors.
-  Future<Map<String, dynamic>> readAi() => _value('Get', [aiProvidersSettingId]);
+  Future<Map<String, dynamic>> readAi() =>
+      _value('Get', [aiProvidersSettingId]);
 
   /// `{provider, usage, modelsDev: {status, provider, models}}`. The provider
   /// row includes `usageError` when visible; catalog usage is null.
