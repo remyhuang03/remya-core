@@ -1,5 +1,5 @@
 name: remya_ui
-description: Shared Flutter theme and identity adapters for Remya applications.
+description: Shared Flutter theme, identity and settings-window components for Remya applications.
 publish_to: none
 version: 0.1.0-dev.20261113.0
 environment:
@@ -11,6 +11,9 @@ dependencies:
     path: ../remya_client
   material_ui: ^1.5.0
   material_color_utilities: ^0.13.0
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
 flutter:
   assets:
     - assets/ai_providers/
