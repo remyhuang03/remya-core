@@ -30,7 +30,7 @@ Package cache and orphan removal use the existing authorized private helper, nev
 
 ## Automatic cleanup
 
-`cleanup.toml`, next to the main configuration, is an app-owned preference with no system reconciliation. Strict version-1 parsing rejects unknown fields and invalid values; invalid files remain untouched and policy controls become read-only. Writes are atomic. Defaults are off, low-space frequency, Trash 30 days, cache 30 days and Downloads Never.
+`cleanup.toml`, under the [system configuration root](xdg-layout.md), holds Core-owned cleanup policy with no external system counterpart to reconcile. Strict version-1 parsing rejects unknown fields and invalid values; invalid files remain untouched and policy controls become read-only. Writes are atomic. Defaults are off, low-space frequency, Trash 30 days, cache 30 days and Downloads Never.
 
 The resident service checks every 60 seconds: daily is 24 hours, weekly 7 days, monthly 30 days since the last run; low-space requires less than 10 percent available on HOME's volume and at least 24 hours since the last run. Run now also works while automatic cleanup is off and uses the saved ages. Zero days means Never.
 
@@ -38,7 +38,7 @@ Old Trash entries are permanently purged according to their deletion date. Cache
 
 ## Verification boundaries
 
-Rust tests use temporary trees and fake D-Bus, process and Trash boundaries. Widget tests use fake state. `storage_checks()` runs inside the normal installed `test/interface_smoke.py` flow, using that suite's isolated HOME/XDG and session bus. Storage checks exercise read-only state and automatic preference writes and reject unreported paths; they never mount devices, clean files, or authorize root. The surrounding suite handles installation.
+Rust tests use temporary trees and fake D-Bus, process and Trash boundaries. Widget tests use fake state. `storage_checks()` runs inside the normal installed `tests/interface_smoke.py` flow, using that suite's isolated HOME/XDG and session bus. Storage checks exercise read-only state and automatic preference writes and reject unreported paths; they never mount devices, clean files, or authorize root. The surrounding suite handles installation.
 
 Destructive UDisks2 operations, real per-mount Trash, interactive polkit and privileged pacman/paccache execution require separate hardware review. No real user caches, Trash, configuration, devices or package database were changed during implementation verification. Installed application behavior has not been tested; installation is explicitly excluded for this task.
 

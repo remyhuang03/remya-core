@@ -4,7 +4,7 @@
 The rule lets the invoking user run only the fixed repository upgrade
 (`remya-core-update upgrade [--include-held]`) without a password, so the
 resident Settings service can run manual and daily updates unattended.
-Remove with: sudo rm /usr/local/libexec/remya-core-update /etc/polkit-1/rules.d/50-top.remya.core.update.rules
+Remove with: sudo rm /usr/local/libexec/remya-core-update /etc/polkit-1/rules.d/50-top.remya.core.update-local.rules
 """
 import os
 from pathlib import Path
@@ -13,7 +13,7 @@ import re
 import tempfile
 
 UPDATER = Path("/usr/local/libexec/remya-core-update")
-RULE = Path("/etc/polkit-1/rules.d/50-top.remya.core.update.rules")
+RULE = Path("/etc/polkit-1/rules.d/50-top.remya.core.update-local.rules")
 MARKER = "// Installed by remya_core tool/install_system_updater.py"
 
 

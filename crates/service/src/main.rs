@@ -42,6 +42,17 @@ fn run() -> Result<(), String> {
         .nth(1)
         .map(Into::into);
     let initial = state::State::new(paths::Roots::detect(debug)?);
+    let (ai_changed, ai_changes) = std::sync::mpsc::channel();
+    initial.requests.ai.set_notifier(ai_changed);
+    let ai = initial.requests.ai.clone();
+    let ai_bus = bus.clone();
+    std::thread::spawn(move || {
+        for () in ai_changes {
+            if let Ok(value) = ai.get(ai::PROVIDERS) {
+                signal(&ai_bus, ai::PROVIDERS, &value);
+            }
+        }
+    });
     let requests = initial.requests.clone();
     let appimages = initial.appimages.clone();
     let storage = initial.storage.clone();

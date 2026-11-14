@@ -48,11 +48,11 @@ See [Airplane mode](network.md#airplane-mode).
 
 ## Verification
 
-- `test/bluetooth_test.dart`: page states, pairing dialogs, explicit confirmation,
+- `../../remya-settings/test/bluetooth_test.dart`: page states, pairing dialogs, explicit confirmation,
   code validation, optional battery, removal confirmation, error recovery, narrow
   layout.
-- `cargo test -p remya_settings_bluetooth`: state parsing and input redaction.
-- `python test/bluetooth_smoke.py [debug|release]`: private system and session buses,
+- `cargo test -p remya_bluetooth`: state parsing and input redaction.
+- `python tests/bluetooth_smoke.py [debug|release]`: private system and session buses,
   real service transport, target checks, every Agent prompt, rejection, incorrect
   PIN, callback sender checks, cancellation, hotplug, daemon restart, readback and
   operation failures. `--timers` also waits for the real scan/pair deadlines.

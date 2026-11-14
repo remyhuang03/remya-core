@@ -1,21 +1,6 @@
 # Network settings
 
-Network & internet manages connections through NetworkManager on the system D-Bus, from the ordinary-user Rust service in `lib/src/rust/network`. NetworkManager is required, in the current Arch Linux release. There is no other backend: when it is stopped or absent, the pages and interfaces report the error and show no sample values. Reads use `NO_AUTO_START`, so inspecting state never starts a stopped service. The Proxy page uses GSettings instead; see [Proxy](#proxy).
-
-## Pages
-
-The pages appear in this order. IP and DNS live with each connection, and options that apply to one page sit in its Advanced section.
-
-| Page | Controls |
-| --- | --- |
-| Network status | A path from this device through the router to the internet, colored by NetworkManager's connectivity. Live download and upload speed with the data moved since the adapter came up. Name, type, IPv4, gateway, DNS, IPv6, link speed, hardware address, physical adapters. Advanced: Check internet connectivity and virtual adapters. Sign-in opens NetworkManager's connectivity address with the desktop opener and appears only when NetworkManager reports a captive portal. |
-| Wi-Fi | Radio switch, adapter choice with more than one Wi-Fi adapter, current network and disconnect, available networks merged per name and security, refresh. Scans run on page entry and every 30 seconds while the page is open. |
-| Known networks | Saved Wi-Fi networks only: add (including hidden networks), search, connect, connect automatically, metered, random hardware address, IP assignment, DNS server assignment, change password, forget. Advanced: connection priority. Active first, then most recently used. |
-| Ethernet | Per physical wired adapter: status (cable unplugged, connected with link speed), Connect or Disconnect, connection details, and for its profile connect automatically, metered, IP assignment and DNS server assignment. |
-| VPN | A path through the active VPN; NetworkManager VPN-plugin and WireGuard profiles with a switch and Remove; Import a VPN file; tunnels such as Tailscale that another program manages, read-only. |
-| Mobile hotspot | A path from the internet through this device to nearby devices; the switch; network name, band and shared connection; Set up or Edit name, password and band. |
-| Airplane mode | See [Airplane mode](#airplane-mode). |
-| Proxy | A path from apps through the proxy; Off, Detect, Script or Manual; script address; HTTP, HTTPS and SOCKS servers; hosts reached directly. |
+Core manages connections through NetworkManager on the system D-Bus, from the ordinary-user daemon through `crates/network`. NetworkManager is required, in the current Arch Linux release. There is no other backend: when it is stopped or absent, the pages and interfaces report the error and show no sample values. Reads use `NO_AUTO_START`, so inspecting state never starts a stopped service. The Proxy page uses GSettings instead; see [Proxy](#proxy).
 
 An adapter is physical when NetworkManager does not flag it as software and `/sys/class/net/<name>/device` exists; VMware adapters look like Ethernet otherwise. The Wi-Fi P2P companion and loopback are not adapters.
 
@@ -71,9 +56,12 @@ The service calls `GetPermissions`. A `no` disables the control with its reason 
 
 ## Reconciliation
 
-`network.toml` beside the service configuration holds version 2, `connectivity_check`, and per profile UUID `autoconnect`, `metered`, `priority`, `mac`, `ip` and, for the hotspot, its name and band. First use snapshots the system without writing to it; a failed read leaves it uninitialized. An invalid or older file is kept and blocks preference changes; the warning offers Use system configuration, which replaces it with a fresh snapshot only on that explicit choice.
-
-A differing preference on a profile present on both sides, or a different connectivity check, is a conflict, with Use system configuration and Apply saved Settings. Applying saved addressing to a connected profile also reapplies it. Preference changes are refused until it is resolved; connecting is not. The radio state, VPN and hotspot connection state, and profile additions or removals are not compared: other tools change them routinely, and a saved entry cannot recreate a deleted profile without its secrets.
+NetworkManager profiles, the radio, VPN and hotspot states follow live state.
+They are not persisted or restored. Only the connectivity-check preference in
+`network.toml` participates in managed reconciliation; see the
+[initialization contract](public-api.md#initialization-conflicts-and-scheduling).
+A conflicting or invalid saved file requires explicit resolution; failed writes
+and readback retain the last valid saved value.
 
 ## Proxy
 
@@ -87,9 +75,9 @@ See [public API](public-api.md#network).
 
 ## Verification
 
-- `cargo test -p remya_settings_network` uses a fake backend for initialization, both resolutions, failure retention, trial profiles, password validation, adapters and permissions, IP validation and reapply, priority, MAC randomization and iwd, the connectivity check, hotspot setup and toggling, VPN import, connection and removal, and Ethernet; and a GSettings memory backend for proxy modes, servers and hosts.
-- `python test/network_smoke.py [debug|release]` runs the service on private session and system buses against a stub NetworkManager and a keyfile GSettings backend, including the radio, connecting, wrong passwords, conflicts, priority, MAC and addressing readback, the connectivity check, the hotspot, VPN connection, proxy writes, a stopped daemon, and the absence of passwords from every emitted message.
-- `test/network_test.dart` covers the Known networks, Ethernet IP editor, hotspot setup and VPN pages; `test/service_controllers_test.dart` covers failed-write retention and unresolved conflicts in the GUI controller.
+- `cargo test -p remya_network` uses a fake backend for initialization, both resolutions, failure retention, trial profiles, password validation, adapters and permissions, IP validation and reapply, priority, MAC randomization and iwd, the connectivity check, hotspot setup and toggling, VPN import, connection and removal, and Ethernet; and a GSettings memory backend for proxy modes, servers and hosts.
+- `python tests/network_smoke.py [debug|release]` runs the service on private session and system buses against a stub NetworkManager and a keyfile GSettings backend, including the radio, connecting, wrong passwords, conflicts, priority, MAC and addressing readback, the connectivity check, the hotspot, VPN connection, proxy writes, a stopped daemon, and the absence of passwords from every emitted message.
+- `../../remya-settings/test/network_test.dart` covers the Known networks, Ethernet IP editor, hotspot setup and VPN pages; `../../remya-settings/test/service_controllers_test.dart` covers failed-write retention and unresolved conflicts in the GUI controller.
 - On a real NetworkManager 1.58, a disposable `autoconnect=no` profile was added, changed, re-keyed, put in conflict, resolved and forgotten without activating it, and real state and scans were read. A disposable WireGuard file was imported and removed through the installed service, and the real wired profile, `tailscale0` and the desktop proxy were read without changes.
 - **Not tested on a real connection:** turning the radio off, connecting, disconnecting and switching Wi-Fi networks, Ethernet disconnect, changing the addressing of a connected profile, connecting a VPN and starting the hotspot. These would interrupt the workstation's connection or broadcast a network; they have stub verification only. Captive-portal sign-in, more than one Wi-Fi adapter, DNS over TLS and the `iwd` backend have also not been run on real hardware.
 
@@ -111,8 +99,8 @@ another fails; successful shutdowns are never rolled back. Refresh displays the
 actual state so a failed operation never implies that all radios are off.
 
 The GUI polls while this page is open. CLI/D-Bus use the same controller and
-verified writes. Verification: network airplane unit tests, `test/airplane_test.dart`
-and private system/session-bus `test/airplane_smoke.py`; no real radios are changed
+verified writes. Verification: network airplane unit tests, `../../remya-settings/test/airplane_test.dart`
+and private system/session-bus `tests/airplane_smoke.py`; no real radios are changed
 by these automated checks.
 
 Upstream contracts: [NetworkManager radio properties](https://networkmanager.pages.freedesktop.org/NetworkManager/NetworkManager/gdbus-org.freedesktop.NetworkManager.html)

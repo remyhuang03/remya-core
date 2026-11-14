@@ -46,8 +46,8 @@ Search matches category/page labels, descriptions, control names, and Windows re
 
 ## Schema and availability
 
-- Runtime data: `assets/settings/catalog.json`.
-- JSON Schema: `assets/settings/catalog.schema.json` (Draft 2020-12).
+- Runtime data: `assets/catalog.json`.
+- JSON Schema: `assets/catalog.schema.json` (Draft 2020-12).
 - Included reference coverage: `docs/windows-settings-coverage.json`.
 - Runtime model: `lib/features/settings/domain/settings_catalog.dart`.
 - Renderer: `lib/features/settings/presentation/`.

@@ -864,11 +864,16 @@ impl State {
                         Ok(field)
                     }
                     "about" => Ok(
-                        json!({"name":"Remy'a Settings","version":env!("CARGO_PKG_VERSION"),"application_id":"top.remya.settings","repository":"https://github.com/remyhuang03/remya-settings","license":"PolyForm-Noncommercial-1.0.0","api_version":1}),
+                        json!({"name":"Remya Core","version":env!("CARGO_PKG_VERSION"),"repository":"https://github.com/remyhuang03/remya-core","license":"PolyForm-Noncommercial-1.0.0","api_version":1}),
                     ),
                     "catalog" => {
                         let mut v = self.catalog.clone();
-                        v["pages"]=json!(self.catalog["pages"].as_array().unwrap().iter().map(|p|json!({"id":p["id"],"title":p["title"],"category":p["category"]})).collect::<Vec<_>>());
+                        let pages = self.catalog["pages"].as_array().unwrap();
+                        v["pages"]=json!(pages.iter().map(|p|json!({"id":p["id"],"title":p["title"],"category":p["category"]})).collect::<Vec<_>>());
+                        // Summaries omit controls, so clients cannot count coverage themselves.
+                        let controls = pages.iter().flat_map(|p| p["sections"].as_array().into_iter().flatten()).flat_map(|s| s["controls"].as_array().into_iter().flatten());
+                        let (total, planned) = controls.fold((0, 0), |(t, n), c| (t + 1, n + usize::from(c["availability"] == "planned")));
+                        v["coverage"] = json!({"supported": total - planned, "planned": planned, "total": total});
                         Ok(v)
                     }
                     _ if key.starts_with("page:") => self.catalog["pages"]
@@ -1632,6 +1637,12 @@ mod tests {
         assert_eq!(
             state.execute("Get", &["page:date-time".into()]).unwrap()["id"],
             "date-time"
+        );
+        let coverage = &state.execute("Get", &["catalog".into()]).unwrap()["coverage"];
+        assert!(coverage["supported"].as_u64().unwrap() > 0);
+        assert_eq!(
+            coverage["supported"].as_u64().unwrap() + coverage["planned"].as_u64().unwrap(),
+            coverage["total"].as_u64().unwrap()
         );
         assert_eq!(
             state.execute("List", &["0".into()]).unwrap()["controls"]

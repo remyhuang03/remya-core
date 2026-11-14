@@ -71,8 +71,9 @@ python tool/install.py
 The installer stages only `remyad`, `remya-core-update`, and `remya` from
 `target/release/`, then swaps `$XDG_DATA_HOME/remya/remya_core/` by rename.
 It creates `~/.local/bin/remya`, refusing unrelated files or symlinks. It asks a
-running installed Core to Quit before replacement and refuses while it remains
-running. A refused Quit aborts the update.
+running installed Core to Quit before replacement; a refused Quit (a system
+update is running) aborts the update. Clients may re-activate the old daemon
+meanwhile; the swap by rename and the final unit restart still replace it.
 
 D-Bus activation uses `$XDG_DATA_HOME/dbus-1/services/top.remya.Core1.service`
 from `packaging/top.remya.Core1.service`, with the installed daemon substituted

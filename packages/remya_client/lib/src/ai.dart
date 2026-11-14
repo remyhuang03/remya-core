@@ -10,7 +10,7 @@ const _aiCredentialSettingId = 'ai.credential';
 const _aiCustomSettingId = 'ai.custom';
 
 /// AI providers tracked by CodexBar and custom OpenAI-compatible endpoints.
-/// Every setter returns the refreshed [aiProvidersSettingId] value.
+/// Every setter returns the current [aiProvidersSettingId] value.
 extension AiClient on SettingsClient {
   Future<Map<String, dynamic>> _value(String method, List<String> args) async =>
       Map<String, dynamic>.from((await call(method, args))['value'] as Map);
@@ -18,10 +18,19 @@ extension AiClient on SettingsClient {
   Future<Map<String, dynamic>> _set(String id, Map<String, Object?> payload) =>
       _value('Set', [id, jsonEncode(payload)]);
 
-  Future<Map<String, dynamic>> readAi() =>
-      _value('Get', [aiProvidersSettingId]);
+  /// Cached usage, returned without waiting for probes. `usage.status` is
+  /// refreshing during a probe, ready if any provider succeeded, or failed if
+  /// none succeeded or probing was unavailable. `usage.error` is a nullable
+  /// short summary; visible provider rows have a nullable, single-line
+  /// `usageError` (at most 200 characters). Failed rows retain their last quota.
+  /// At most six CodexBar processes run together (five usage workers and one
+  /// config/version command). Relevant providers refresh
+  /// before automatic discovery (at most once per five minutes); each phase
+  /// emits ai.providers Changed. Catalog providers expose no probe errors.
+  Future<Map<String, dynamic>> readAi() => _value('Get', [aiProvidersSettingId]);
 
-  /// `{provider, usage, modelsDev: {status, provider, models}}`.
+  /// `{provider, usage, modelsDev: {status, provider, models}}`. The provider
+  /// row includes `usageError` when visible; catalog usage is null.
   Future<Map<String, dynamic>> readAiProvider(String id) =>
       _value('Get', ['$_aiProviderPrefix$id']);
 

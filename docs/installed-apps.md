@@ -14,7 +14,7 @@ The feature reuses the installed GTK 3 runner for themed icon rendering; raster 
 - `installed.32098ab2`: per-application details.
 - `installed.c3c4a29c`: confirmed uninstall.
 
-The application list uses the shared `SettingsList` container with a fixed header, a bounded scrollable body and `ListView.builder`. Search, sorting, source filtering and Refresh live in the header; filtering and sorting operate on the observed metadata. Inventory is refreshed on page entry, explicit Refresh, and uninstall outcomes. These are live observations and session-local view preferences, so there is no saved system configuration to reconcile.
+Inventory is live observation, with no saved configuration to reconcile.
 
 Native metadata comes from the current ALPM database format (pacman 6.1+), using the system's `pacman-conf DBPath`. Package size belongs to the entire package; launchers sharing a package repeat that size. Flatpak uses the current `list --json` interface and `info --show-size`. Version and deployment date may be unavailable; no filesystem timestamp is labeled as a Flatpak installation date. Displayed native dates are formatted using actual system LC_TIME via the Rust date/time backend.
 
@@ -30,6 +30,6 @@ Manual installations remain visible with an explanation and disabled uninstall. 
 
 ## Verification
 
-`test/service_controllers_test.dart` covers fresh inventory and failure retention after unsuccessful uninstall operations. UI search, lazy rows, details, and confirmation were checked during implementation; their local presentation tests are not retained. Rust tests cover current ALPM parsing, duplicate/invalid metadata, and invalid uninstall requests. `test/interface_smoke.py` verifies actual native versions/dates against pacman, unauthorized native rejection, and a real temporary user Flatpak install/uninstall with application data retained, plus CLI/D-Bus parity. No real workstation package is removed by verification; successful privileged native/system-Flatpak removal remains a manual verification boundary.
+`../../remya-settings/test/service_controllers_test.dart` covers fresh inventory and failure retention after unsuccessful uninstall operations. UI search, lazy rows, details, and confirmation were checked during implementation; their local presentation tests are not retained. Rust tests cover current ALPM parsing, duplicate/invalid metadata, and invalid uninstall requests. `tests/interface_smoke.py` verifies actual native versions/dates against pacman, unauthorized native rejection, and a real temporary user Flatpak install/uninstall with application data retained, plus CLI/D-Bus parity. No real workstation package is removed by verification; successful privileged native/system-Flatpak removal remains a manual verification boundary.
 
 References: [ALPM description format](https://man.archlinux.org/man/alpm-db-desc.5.en), [ALPM files format](https://man.archlinux.org/man/alpm-db-files.5.en), [pacman](https://man.archlinux.org/man/pacman.8.en), [Flatpak commands](https://docs.flatpak.org/en/latest/flatpak-command-reference.html).

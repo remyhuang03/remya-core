@@ -64,11 +64,12 @@ end in `.desktop`, and contain no path separators, leading dot or control charac
 
 ## Reconciliation
 
-`startup.toml` lives next to the selected main Settings config, with `version = 1`
+`startup.toml` lives under the [system configuration root](xdg-layout.md), with `version = 1`
 and an `[enabled]` table mapping filenames to booleans. Unknown fields, invalid
 IDs and unsupported versions are rejected without overwriting the file.
 
-First successful detection saves actual enabled states and never applies defaults.
+Unmanaged detection observes actual enabled states without saving. Manage, Set
+or Resolve starts management; detection never applies defaults.
 Refresh compares only shared IDs: changed enabled states create explicit conflicts,
 with both values retained. The entry set is excluded: additions are adopted and
 removals dropped automatically because Settings cannot recreate a deleted file's
@@ -96,11 +97,11 @@ never persisted. A 30-second service refresh emits Changed startup when it chang
 
 ## Verification and boundaries
 
-`cargo test -p remya_settings_startup -p remya_settings_service` covers isolated
+`cargo test -p remya_startup -p remya_service` covers isolated
 files, generator filters, override preservation, command quoting, validation,
 reconciliation and failing writes, with a fake systemd query.
-`test/startup_page_test.dart` covers the page, controller, dialogs and routing.
-`startup_fixtures()` and `startup_checks()` in `test/interface_smoke.py` cover the
+`../../remya-settings/test/startup_page_test.dart` covers the page, controller, dialogs and routing.
+`startup_fixtures()` and `startup_checks()` in `tests/interface_smoke.py` cover the
 normal installed CLI/D-Bus smoke flow, using temporary HOME/XDG roots and a private
 session bus. The architect runs this full flow after installation; it was not
 rerun during this review because it invokes installers and other desktop features.

@@ -19,7 +19,7 @@ The binding uses PulseAudio 15+ APIs. There is no shell command backend, privile
 helper or system configuration file editor for audio. Each request uses a bounded
 native connection, without autospawning a server. Missing or unresponsive audio
 services report an error; device state is never invented. One blocking PulseAudio
-subscription in the Settings service watches playback sinks and server defaults.
+subscription in Core watches playback sinks and server defaults.
 It combines nearby events into one read and publishes changed snapshots through
 `Changed("sound", state)`. The existing 30-second service refresh and open Sound
 page's two-second refresh also cover other inventory changes.
@@ -37,7 +37,7 @@ have been removed from these pages.
 ## Live state and operations
 
 All audio controls follow the audio server's live state, including device volume,
-mute, default input/output devices and application routing. Settings does not
+mute, default input/output devices and application routing. Core does not
 persist audio preferences, compare them with a saved configuration, or restore
 old values. External changes and device additions/removals are reflected on the
 next read without a configuration conflict. No sound configuration file is read
@@ -58,14 +58,13 @@ test, and no microphone audio is captured by Settings.
 
 ## Verification
 
-`cargo test -p remya_settings_sound` covers reads without writes, external
+`cargo test -p remya_sound` covers reads without writes, external
 changes and inventory changes across restarts, channel balance, failed/mismatched
 readback, field-scoped verification, stale stream identity and error retention.
-Flutter `test/sound_test.dart` covers the pure Dart client contract, scoped
+Flutter `../../remya-settings/test/sound_test.dart` covers the pure Dart client contract, scoped
 output/input writes, live control refresh, mixer behavior and error retention.
-Catalog tests cover navigation, source mapping and the progress tracker.
 
-`cargo test -p remya_settings_sound --test isolated_pulse -- --ignored` starts
+`cargo test -p remya_sound --test isolated_pulse -- --ignored` starts
 private PipeWire and pipewire-pulse servers, a WirePlumber policy-only instance
 (without hardware monitors), and two null sinks inside a temporary runtime.
 It verifies real native device/default/mute/volume and application stream routing
@@ -75,7 +74,6 @@ backend does not invoke them. The test kills every child and removes its tempora
 configuration/state. Physical hardware, Bluetooth handover and audible playback
 are separate manual boundaries.
 
-`python test/sound_smoke.py debug` verifies actual CLI/D-Bus parity, input
+`python tests/sound_smoke.py debug` verifies actual CLI/D-Bus parity, input
 validation, live external changes, restarts, removed resolution requests and Sound
-change notifications on private session/system-bus and PipeWire state. It uses the compiled service and a Linux
-bundle's generic CLI, then terminates all validation processes.
+change notifications on private session/system-bus and PipeWire state. It uses the compiled Core daemon and CLI, then terminates all validation processes.

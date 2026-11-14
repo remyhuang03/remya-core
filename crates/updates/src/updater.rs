@@ -2,8 +2,11 @@
 use crate::{held_packages, installed_packages, nvidia_loaded};
 use std::process::Command;
 
-/// Fixed install path; the polkit rule allows exactly this program.
-pub const PATH: &str = "/usr/local/libexec/remya-core-update";
+/// Fixed install paths, packaged first; each polkit rule allows exactly its own program.
+pub const PATHS: [&str; 2] = [
+    "/usr/lib/remya-core/remya-core-update",
+    "/usr/local/libexec/remya-core-update",
+];
 
 /// Accepts `upgrade` or `upgrade --include-held` from an ordinary user through pkexec.
 pub fn parse(args: &[String], euid: u32, pkexec_uid: Option<String>) -> Result<bool, String> {
