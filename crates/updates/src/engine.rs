@@ -14,7 +14,16 @@ pub(crate) trait Backend: Send + Sync {
     fn updater(&self) -> &'static str;
 }
 pub(crate) struct RealBackend {
-    pub updater: PathBuf,
+    pub updaters: Vec<PathBuf>,
+}
+impl RealBackend {
+    /// The first installed updater, so a package install wins over a source install.
+    fn path(&self) -> &Path {
+        self.updaters
+            .iter()
+            .find(|path| path.is_file())
+            .unwrap_or(&self.updaters[0])
+    }
 }
 const YAY: &str = "/usr/bin/yay";
 impl Backend for RealBackend {
@@ -68,17 +77,18 @@ impl Backend for RealBackend {
     }
     fn upgrade(&self, all: bool, output: &mut dyn FnMut(&str)) -> Result<i32, String> {
         let mut command = Command::new("/usr/bin/pkexec");
-        command.arg(&self.updater).arg("upgrade");
+        command.arg(self.path()).arg("upgrade");
         if all {
             command.arg("--include-held");
         }
         process::run(command, output)
     }
     fn updater(&self) -> &'static str {
-        if !self.updater.is_file() {
+        let path = self.path();
+        if !path.is_file() {
             return "missing";
         }
-        match Command::new(&self.updater).arg("version").output() {
+        match Command::new(path).arg("version").output() {
             Ok(out)
                 if out.status.success()
                     && String::from_utf8_lossy(&out.stdout).trim()

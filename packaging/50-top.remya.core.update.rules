@@ -1,0 +1,16 @@
+// Installed by the remya-core package. Lets administrators (wheel) run only the
+// fixed Remya repository upgrade without a password, so remyad can run manual
+// and scheduled updates unattended. No session check: remyad is a systemd user
+// unit, which has no logind session.
+polkit.addRule(function(action, subject) {
+    var updater = "/usr/lib/remya-core/remya-core-update";
+    if (action.id == "org.freedesktop.policykit.exec" &&
+        action.lookup("program") == updater &&
+        subject.isInGroup("wheel")) {
+        var command = action.lookup("command_line");
+        if (command == updater + " upgrade" ||
+            command == updater + " upgrade --include-held") {
+            return polkit.Result.YES;
+        }
+    }
+});

@@ -22,6 +22,8 @@ use std::{
 /// Bump whenever the root updater's behavior or arguments change.
 pub const UPDATER_VERSION: u32 = 1;
 pub const INSTALL_COMMAND: &str = "sudo python tool/install_system_updater.py";
+/// Packages install the updater and its polkit rule; only source installs need the command.
+const NOT_READY: &str = "Reinstall the remya-core package, or for a source install run the command below from the remya-core checkout once.";
 pub const CHECK: &str = "updates.check";
 pub const UPGRADE: &str = "updates.upgrade";
 pub const ALL: &str = "updates.include-held";
@@ -163,9 +165,7 @@ fn retry_delay(attempt: u32) -> u64 {
     u64::from(attempt).saturating_mul(5).min(60)
 }
 fn not_ready(updater: &str) -> String {
-    format!(
-        "Unavailable:The system updater is {updater}. Run {INSTALL_COMMAND} from the Settings source tree once."
-    )
+    format!("Unavailable:The system updater is {updater}. {NOT_READY}")
 }
 impl Updates {
     pub fn new(configuration: PathBuf, write: fn(&Path, &[u8]) -> Result<(), String>) -> Self {
@@ -180,7 +180,7 @@ impl Updates {
         .collect();
         Self::with_backend(
             Arc::new(RealBackend {
-                updater: updater::PATH.into(),
+                updaters: updater::PATHS.map(PathBuf::from).to_vec(),
             }),
             required,
             schedule::Schedule::load(configuration, write),
@@ -246,7 +246,7 @@ impl Updates {
             ))
         } else if !available {
             Some(format!(
-                "The system updater is {}. Run {INSTALL_COMMAND} from the Settings source tree once.",
+                "The system updater is {}. {NOT_READY}",
                 state.updater
             ))
         } else {
@@ -676,7 +676,13 @@ mod tests {
             let updates = service(backend.clone());
             let state = updates.state();
             assert_eq!(state["available"], false);
-            assert!(state["reason"].as_str().unwrap().contains(INSTALL_COMMAND));
+            assert!(
+                state["reason"]
+                    .as_str()
+                    .unwrap()
+                    .contains("remya-core package")
+                    && state["install_command"] == INSTALL_COMMAND
+            );
             assert!(
                 updates
                     .set(UPGRADE, "upgrade")
