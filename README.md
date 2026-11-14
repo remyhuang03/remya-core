@@ -3,7 +3,7 @@
 Shared backend for the Remya applications on Hyprland/Linux: [Settings](https://github.com/remyhuang03/remya-settings), [Bar](https://github.com/remyhuang03/remya-bar), [Launcher](https://github.com/remyhuang03/remya-launcher) and [Screen Capture](https://github.com/remyhuang03/remya-screen-capture). Each application depends only on Remya Core, so any one of them can be installed on its own.
 
 > [!CAUTION]
-> Early development. Interfaces change without compatibility aliases.
+> This is a beta release for Arch Linux on Hyprland. Interfaces can change between releases.
 
 ## Contents
 
@@ -23,19 +23,38 @@ Shared backend for the Remya applications on Hyprland/Linux: [Settings](https://
 
 A system feature is written only after it is first changed or opened in Settings; installing Bar alone takes over nothing. See [XDG layout](docs/xdg-layout.md), [public API](docs/public-api.md) and [app preferences](docs/app-preferences.md).
 
-## Install from source
+## Installation
+
+Install Remya Core before installing any Remya application. Core provides the
+`top.remya.Core1` session D-Bus API and the `top.remya.core.service` user unit.
+
+### Arch User Repository
+
+Choose `remya-core` to build from source or `remya-core-bin` for the prebuilt
+x86_64 package. For example:
 
 ```bash
+paru -S remya-core-bin
+```
+
+The AUR packages include the privileged system updater and its polkit rule.
+See [System updates](docs/updates.md#system-setup) for details.
+
+### Linux x86_64 release archive
+
+Download the archive and `SHA256SUMS` from [GitHub Releases](https://github.com/remyhuang03/remya-core/releases):
+
+```bash
+sha256sum -c SHA256SUMS
+tar --zstd -xf remya_core-0.1.0-linux-x86_64.tar.zst
+cd remya_core-0.1.0-linux-x86_64
 python tool/install.py
 ```
 
-Install Remya Core before any Remya application. Source installs that use system updates also need the root updater once:
-
-```bash
-sudo python tool/install_system_updater.py
-```
-
-Packages (`remya-core`, `remya-core-bin`, `remya-core-git`) install the updater and its polkit rule themselves.
+The installer adds the `remya` command, D-Bus activation and a user service that
+starts with the graphical session. Enable the optional system updater separately
+when installing outside the system package manager. See
+[build, installation and migration instructions](docs/xdg-layout.md).
 
 ## License
 
