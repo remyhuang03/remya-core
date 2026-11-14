@@ -6,12 +6,15 @@ import shutil
 import shlex
 import subprocess
 import tempfile
-import time
 
 APP_ID = "remya_core"
 PACKAGE = "top.remya.Core1"
 UNIT = "top.remya.core.service"
 BINARIES = ("remyad", "remya-core-update", "remya")
+
+
+# Packaged first, then the source install (see crates/updates/src/updater.rs).
+UPDATERS = ("/usr/lib/remya-core/remya-core-update", "/usr/local/libexec/remya-core-update")
 
 
 def data_home(environment):
@@ -77,14 +80,11 @@ def install(root, environment):
     if not all((source / binary).is_file() for binary in BINARIES):
         raise RuntimeError("Build the Core release binaries first (see docs/xdg-layout.md)")
     destination = data / "remya" / APP_ID
-    stopped = bundle_running(destination) and stop_service()
-    for _ in range(100):
-        if not (stopped and bundle_running(destination)):
-            break
-        time.sleep(0.1)
-    # Refuse an update while this installed bundle is executing.
+    # Quit refuses while a system update runs. Clients may re-activate the old
+    # daemon at once; that is harmless because the bundle is swapped by rename
+    # and the unit restart below replaces whichever daemon is running.
     if bundle_running(destination):
-        raise RuntimeError(f"Stop {APP_ID} before updating its installed bundle")
+        stop_service()
     home = environment.get("HOME", "")
     if not home.startswith("/"):
         raise ValueError("An absolute HOME is required for ~/.local/bin")
@@ -126,7 +126,8 @@ def install(root, environment):
     print(f"Installed {PACKAGE} in {destination}")
     print(f"Command: {command} (add ~/.local/bin to PATH if needed)")
     print(f"Service: {UNIT} starts with the graphical session")
-    print("System updates: run sudo python tool/install_system_updater.py once to install the root updater")
+    if not any(Path(path).is_file() for path in UPDATERS):
+        print("System updates: run sudo python tool/install_system_updater.py once to install the root updater")
 
 
 if __name__ == "__main__":
