@@ -1,0 +1,14 @@
+#!/bin/sh
+# The offline service test replaces usage probes and needs one enabled provider.
+
+case "$*" in
+  --version)
+    printf '%s\n' 'codexbar 0.0.0'
+    ;;
+  'config providers --format json')
+    printf '%s\n' '[{"provider":"codex","displayName":"Codex","enabled":true,"defaultEnabled":true}]'
+    ;;
+  *)
+    exit 1
+    ;;
+esac

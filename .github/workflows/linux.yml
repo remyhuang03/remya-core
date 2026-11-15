@@ -75,7 +75,8 @@ jobs:
           fvm dart format --output=none --set-exit-if-changed packages tool
           python -m unittest tests/xdg_install_test.py
           cargo clippy --locked --workspace --all-targets -- -D warnings
-          cargo test --locked --workspace
+          PATH="$PWD/.github/fixtures:$PATH" CODEXBAR_CONFIG="$HOME/.codexbar-ci-config.json" \
+            cargo test --locked --workspace
           cargo build --locked -p remya_service -p remya_updates
           (cd tool && fvm dart compile exe remya_cli.dart -o ../target/debug/remya)
           BUILD
