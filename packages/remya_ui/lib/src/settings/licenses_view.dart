@@ -1,4 +1,5 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'navigation.dart';
@@ -17,7 +18,15 @@ class _LicensesViewState extends State<RemyaLicensesView> {
   String? _selected;
 
   Future<Map<String, List<LicenseEntry>>> _loadLicenses() async {
-    final packages = <String, List<LicenseEntry>>{};
+    const solver = 'Croppy native solver: Kiwi';
+    final notice = await rootBundle.loadString(
+      'packages/remya_ui/assets/licenses/croppy-kiwi.txt',
+    );
+    final packages = <String, List<LicenseEntry>>{
+      solver: [
+        LicenseEntryWithLineBreaks([solver], notice),
+      ],
+    };
     await for (final entry in LicenseRegistry.licenses) {
       for (final package in entry.packages) {
         packages.putIfAbsent(package, () => []).add(entry);

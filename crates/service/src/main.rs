@@ -3,6 +3,7 @@ mod events;
 mod paths;
 mod privileged;
 mod requests;
+mod shared_theme;
 mod state;
 use gio::glib::{self, variant::ToVariant};
 use std::sync::{Arc, Mutex};
@@ -120,14 +121,14 @@ fn run() -> Result<(), String> {
                     accent,
                     theme_changed,
                     accent_changed,
-                    appearance_error,
+                    theme_error,
                 ) = gio::spawn_blocking(move || {
                     let mut state = worker.lock().unwrap();
                     let before = state.theme.clone();
                     let accent_before = state.background.accent_state();
                     let result = state.execute(&work_method, &work_args);
-                    let appearance_error =
-                        if work_method == "Set" && work_args[0].starts_with("themes.material-") {
+                    let theme_error =
+                        if work_method == "Set" && shared_theme::field(&work_args[0]).is_some() {
                             result.as_ref().err().cloned()
                         } else {
                             None
@@ -149,7 +150,7 @@ fn run() -> Result<(), String> {
                         state.background.accent_state(),
                         state.theme != before,
                         state.background.accent_state() != accent_before,
-                        appearance_error,
+                        theme_error,
                     )
                 })
                 .await
@@ -191,6 +192,17 @@ fn run() -> Result<(), String> {
                 if ["Set", "Resolve", "Manage", "Reload"].contains(&method.as_str()) {
                     if theme_changed {
                         signal(&bus, "theme", &theme);
+                    }
+                    if method == "Reload"
+                        || args.first().is_some_and(|id| {
+                            id == "appearance" || id == remya_appearance::APPLY_TO_SYSTEM
+                        })
+                    {
+                        signal(
+                            &bus,
+                            "appearance",
+                            &state.lock().unwrap().appearance.state(),
+                        );
                     }
                     signal(&bus, "date-time", &date);
                     signal(&bus, "display", &display);
@@ -309,7 +321,7 @@ fn run() -> Result<(), String> {
                         signal(&bus, "fonts", &serde_json::json!({}));
                     }
                 }
-                if let Some(message) = appearance_error {
+                if let Some(message) = theme_error {
                     signal(&bus, "error", &serde_json::json!({"message":message}));
                 }
                 if let Some(page) = opened_page {
@@ -439,6 +451,7 @@ fn run() -> Result<(), String> {
             std::thread::spawn(move || {
                 let mut s = state.lock().unwrap();
                 let before = s.theme.clone();
+                let appearance = s.appearance.state();
                 let errors = s.theme_error.clone();
                 let accent = s.background.accent_state();
                 let network = s.network.state();
@@ -464,6 +477,9 @@ fn run() -> Result<(), String> {
                 }
                 if s.background.accent_state() != accent {
                     signal(&bus, "accent", &s.background.accent_state());
+                }
+                if s.appearance.state() != appearance {
+                    signal(&bus, "appearance", &s.appearance.state());
                 }
                 if s.theme != before {
                     signal(&bus, "theme", &s.theme);

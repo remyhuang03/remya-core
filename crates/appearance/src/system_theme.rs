@@ -3,10 +3,12 @@ use crate::files::{FileChange, key_file, read_optional};
 use crate::{SystemThemeMode, SystemThemeState, ThemeTargetResult, ThemeTargetStatus};
 use gio::glib::{self, variant::ToVariant};
 use gio::prelude::*;
+use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 
@@ -561,26 +563,174 @@ impl AppearancePlan {
     }
 }
 
-fn apply_context(context: &Context, mode: SystemThemeMode) -> Result<SystemThemeState, String> {
+fn apply_context(
+    context: &Context,
+    mode: SystemThemeMode,
+    snapshot: Option<&Path>,
+) -> Result<SystemThemeState, String> {
     let _lock = context.lock()?;
-    let targets = prepare_context(context, mode)?.apply(context)?;
+    let mut plan = prepare_context(context, mode)?;
+    if let Some(path) = snapshot {
+        plan.files.push(snapshot_change(path, mode)?);
+    }
+    let targets = plan.apply(context)?;
     Ok(SystemThemeState {
         mode: Some(mode),
         targets,
     })
 }
 
-pub(crate) fn read() -> Result<SystemThemeState, String> {
-    read_context(&Context::current()?)
+pub const APPLY_TO_SYSTEM: &str = "themes.apply-to-system";
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct Snapshot {
+    mode: SystemThemeMode,
 }
-pub(crate) fn apply(mode: SystemThemeMode) -> Result<SystemThemeState, String> {
-    apply_context(&Context::current()?, mode)
+
+fn snapshot_change(path: &Path, mode: SystemThemeMode) -> Result<FileChange, String> {
+    let exists = path.try_exists().map_err(|error| error.to_string())?;
+    FileChange::prepare_text(path, |original| {
+        if exists || !original.is_empty() {
+            toml::from_str::<Snapshot>(original).map_err(|error| error.to_string())?;
+        }
+        toml::to_string(&Snapshot { mode }).map_err(|error| error.to_string())
+    })
+}
+
+/// Tracks explicitly managed desktop appearance independently of the Remya theme.
+pub struct DesktopTheme {
+    path: PathBuf,
+    saved: Option<SystemThemeMode>,
+    system: SystemThemeState,
+    error: Option<String>,
+}
+
+impl DesktopTheme {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            saved: None,
+            system: SystemThemeState {
+                mode: None,
+                targets: vec![],
+            },
+            error: None,
+        }
+    }
+
+    fn read(&mut self, context: &Context) -> Result<(), String> {
+        self.system = read_context(context)?;
+        self.saved = read_optional(&self.path)?
+            .map(|bytes| {
+                let text = std::str::from_utf8(&bytes).map_err(|error| error.to_string())?;
+                toml::from_str::<Snapshot>(text)
+                    .map(|snapshot| snapshot.mode)
+                    .map_err(|error| format!("{}: {error}", self.path.display()))
+            })
+            .transpose()?;
+        Ok(())
+    }
+
+    pub fn refresh(&mut self) {
+        let result = Context::current().and_then(|context| self.read(&context));
+        self.error = result.err();
+    }
+
+    pub fn system(&self) -> &SystemThemeState {
+        &self.system
+    }
+
+    pub fn state(&self) -> Value {
+        let live = self.system.mode;
+        json!({
+            "saved": self.saved,
+            "system": live,
+            "conflict": matches!((self.saved, live), (Some(saved), Some(live)) if saved != live),
+            "error": self.error,
+            "targets": self.system.targets,
+        })
+    }
+
+    pub fn manage(&mut self) -> Result<Value, String> {
+        self.refresh();
+        if let Some(error) = &self.error {
+            return Err(error.clone());
+        }
+        if self.saved.is_none() {
+            return self.resolve("system");
+        }
+        Ok(self.state())
+    }
+
+    pub fn apply(&mut self, mode: SystemThemeMode) -> Result<Value, String> {
+        self.apply_with(&Context::current()?, mode)
+    }
+
+    fn apply_with(&mut self, context: &Context, mode: SystemThemeMode) -> Result<Value, String> {
+        self.system = apply_context(context, mode, Some(&self.path))?;
+        self.saved = Some(mode);
+        self.error = None;
+        Ok(self.state())
+    }
+
+    pub fn resolve(&mut self, source: &str) -> Result<Value, String> {
+        let context = Context::current()?;
+        self.read(&context)?;
+        match source {
+            "system" => {
+                let mode = self
+                    .system
+                    .mode
+                    .ok_or("System appearance cannot be detected")?;
+                let _lock = context.lock()?;
+                snapshot_change(&self.path, mode)?.apply()?;
+                self.saved = Some(mode);
+                self.error = None;
+                Ok(self.state())
+            }
+            "settings" => self.apply_with(
+                &context,
+                self.saved.ok_or("Desktop appearance is not managed")?,
+            ),
+            _ => Err("InvalidArgument:Unknown appearance resolution".into()),
+        }
+    }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn desktop_theme_becomes_managed_only_on_explicit_application() {
+        let root = tempfile::tempdir().unwrap();
+        let context = context(root.path());
+        let path = root.path().join("remya/system/appearance.toml");
+        let mut theme = DesktopTheme::new(path.clone());
+        theme.read(&context).unwrap();
+        assert_eq!(theme.state()["saved"], Value::Null);
+        assert!(!path.exists());
+
+        let state = theme.apply_with(&context, SystemThemeMode::Dark).unwrap();
+        assert_eq!(state["saved"], "dark");
+        assert_eq!(state["system"], "dark");
+        let mut reopened = DesktopTheme::new(path.clone());
+        reopened.read(&context).unwrap();
+        assert_eq!(reopened.state()["saved"], "dark");
+        assert_eq!(reopened.state()["system"], "dark");
+
+        for invalid in ["", "unknown = true"] {
+            fs::write(&path, invalid).unwrap();
+            assert!(theme.apply_with(&context, SystemThemeMode::Light).is_err());
+            assert_eq!(
+                read_context(&context).unwrap().mode,
+                Some(SystemThemeMode::Dark)
+            );
+            assert_eq!(fs::read_to_string(&path).unwrap(), invalid);
+        }
+    }
 
     #[test]
     fn theme_names_cannot_escape_the_theme_directory_or_inject_ini_keys() {
@@ -642,7 +792,7 @@ pub(crate) mod tests {
             fs::write(context.config.join(toolkit).join("settings.ini"), "# Keep\n[Settings]\ngtk-theme-name=adw-gtk3-dark\ngtk-font-name=Example 11\ngtk-application-prefer-dark-theme=1\n").unwrap();
         }
         for mode in [SystemThemeMode::Light, SystemThemeMode::Dark] {
-            let state = apply_context(&context, mode).unwrap();
+            let state = apply_context(&context, mode, None).unwrap();
             assert_eq!(state.mode, Some(mode));
             assert_eq!(
                 context.gnome.as_ref().unwrap().string("color-scheme"),
@@ -678,14 +828,14 @@ pub(crate) mod tests {
             .unwrap();
         fs::create_dir_all(context.config.join("gtk-4.0")).unwrap();
         fs::write(context.config.join("gtk-4.0/settings.ini"), "malformed").unwrap();
-        assert!(apply_context(&context, SystemThemeMode::Dark).is_err());
+        assert!(apply_context(&context, SystemThemeMode::Dark, None).is_err());
         assert_eq!(
             context.gnome.as_ref().unwrap().string("color-scheme"),
             "default"
         );
         assert!(!context.config.join("gtk-3.0/settings.ini").exists());
         fs::write(context.config.join("gtk-4.0/settings.ini"), "[Settings]\n").unwrap();
-        let report = apply_context(&context, SystemThemeMode::Dark).unwrap();
+        let report = apply_context(&context, SystemThemeMode::Dark, None).unwrap();
         assert_eq!(
             context.gnome.as_ref().unwrap().string("gtk-theme"),
             "Custom-No-Pair"
@@ -710,7 +860,7 @@ pub(crate) mod tests {
             verify_backend: false,
             environment: Environment::default(),
         };
-        let report = apply_context(&context, SystemThemeMode::Dark).unwrap();
+        let report = apply_context(&context, SystemThemeMode::Dark, None).unwrap();
         assert_eq!(
             report
                 .targets
@@ -774,7 +924,7 @@ pub(crate) mod tests {
         let schema = context.gnome.as_ref().unwrap().settings_schema().unwrap();
         let locked = gio::null_settings_backend_new();
         context.gnome = Some(gio::Settings::new_full(&schema, Some(&locked), None));
-        assert!(apply_context(&context, SystemThemeMode::Dark).is_err());
+        assert!(apply_context(&context, SystemThemeMode::Dark, None).is_err());
         assert!(!context.config.join("gtk-3.0/settings.ini").exists());
     }
 }

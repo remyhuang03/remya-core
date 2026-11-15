@@ -34,10 +34,4 @@ pub struct SystemThemeState {
     pub targets: Vec<ThemeTargetResult>,
 }
 
-pub fn read_system_theme() -> Result<SystemThemeState, String> {
-    crate::system_theme::read()
-}
-
-pub fn apply_system_theme(mode: SystemThemeMode) -> Result<SystemThemeState, String> {
-    crate::system_theme::apply(mode)
-}
+pub use system_theme::{APPLY_TO_SYSTEM, DesktopTheme};

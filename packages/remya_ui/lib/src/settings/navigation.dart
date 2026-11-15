@@ -121,24 +121,35 @@ class RemyaSidebarGroup extends StatelessWidget {
   final List<Widget> children;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: .stretch,
-    children: [
-      if (title case final title?)
-        if (compact)
-          const SizedBox(height: 14)
-        else
-          Padding(
-            padding: const .fromLTRB(12, 14, 8, 8),
-            child: Text(title, style: Theme.of(context).textTheme.labelMedium),
-          ),
-      Material(
-        color: Theme.of(context).colorScheme.surfaceContainer,
-        borderRadius: .circular(24),
-        clipBehavior: .antiAlias,
-        child: Column(crossAxisAlignment: .stretch, children: children),
-      ),
-    ],
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    explicitChildNodes: true,
+    label: compact ? title : null,
+    child: Column(
+      crossAxisAlignment: .stretch,
+      children: [
+        if (title case final title?)
+          if (compact)
+            const SizedBox(height: 14)
+          else
+            Padding(
+              padding: const .fromLTRB(12, 14, 8, 8),
+              child: Semantics(
+                header: true,
+                child: Text(
+                  title,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+              ),
+            ),
+        Material(
+          color: Theme.of(context).colorScheme.surfaceContainer,
+          borderRadius: .circular(24),
+          clipBehavior: .antiAlias,
+          child: Column(crossAxisAlignment: .stretch, children: children),
+        ),
+      ],
+    ),
   );
 }
 
@@ -196,20 +207,27 @@ class RemyaSidebarItem extends StatelessWidget {
   }
 }
 
-/// A colored circle behind an icon, used for sidebar categories and pages.
-/// Colors default to the primary container pair of the theme.
+/// Sidebar colors identify categories across Remya applications.
+enum RemyaSettingsCategory {
+  connections('Connections', Color(0xffb8d8ff), Color(0xff12385b)),
+  personalization('Personalization', Color(0xffffc4df), Color(0xff5b173d)),
+  system('Device & system', Color(0xffbdebbd), Color(0xff1b4624)),
+  privacy('Accounts & privacy', Color(0xffa8e8ed), Color(0xff004b50)),
+  preferences('Language & accessibility', Color(0xffffdda6), Color(0xff593b08));
+
+  const RemyaSettingsCategory(this.title, this.background, this.foreground);
+
+  final String title;
+  final Color background;
+  final Color foreground;
+}
+
+/// A colored circle behind a category or page icon.
 class RemyaSidebarIcon extends StatelessWidget {
-  const RemyaSidebarIcon(
-    this.icon, {
-    super.key,
-    this.size = 34,
-    this.background,
-    this.foreground,
-  });
+  const RemyaSidebarIcon(this.icon, {super.key, this.size = 34, this.category});
   final IconData icon;
   final double size;
-  final Color? background;
-  final Color? foreground;
+  final RemyaSettingsCategory? category;
 
   @override
   Widget build(BuildContext context) {
@@ -218,12 +236,12 @@ class RemyaSidebarIcon extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: background ?? colors.primaryContainer,
+        color: category?.background ?? colors.primaryContainer,
         shape: .circle,
       ),
       child: Icon(
         icon,
-        color: foreground ?? colors.onPrimaryContainer,
+        color: category?.foreground ?? colors.onPrimaryContainer,
         size: size * .55,
       ),
     );

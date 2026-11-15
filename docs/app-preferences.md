@@ -7,7 +7,13 @@ apps consume the public API. See [XDG layout](xdg-layout.md) for roots and
 `crates/appearance` contains system detection and application, atomic file updates,
 and toolkit environment coordination. `crates/service` owns the shared preference
 file and serialization. `packages/remya_client` supplies pure Dart contracts;
-shared Flutter theme and identity adapters live in `packages/remya_ui`. Settings pages remain in the GUI repo.
+shared Flutter theme, identity adapters and settings components live in
+`packages/remya_ui`. Each app chooses which shared settings it exposes. App-owned
+pages and registrations stay in the app repositories. The shared sidebar uses the same
+category order, headings and icon colors across apps. Categorized pages of the
+same kind share a single sidebar group. The compact sidebar retains the grouping
+and exposes category names to assistive technology.
+
 
 ## Shared theme TOML
 
@@ -20,21 +26,33 @@ version = 1
 [theme]
 style_variant = "tonal_spot"
 theme_mode = "light"
+contrast = "standard"
 ```
 
 Styles are `tonal_spot`, `fidelity`, `monochrome`, `neutral`, `vibrant`, `expressive`,
 `content`, `rainbow`, and `fruit_salad`. Theme mode is `light` or `dark`.
-Absent fields have Tonal spot/Light defaults; a missing file may initialize from
-the detected system mode because it is a Remya-owned shared preference.
+Contrast is `standard`, `medium` or `high`, mapped to Material contrast levels
+0, 0.5 and 1 in light and dark schemes. Missing fields default to Tonal spot,
+Light and Standard. A missing theme file initializes with the detected light or
+dark mode when available.
 `accent.toml` holds the Material seed separately, keeping the theme schema unchanged.
 
 Invalid files retain the last valid in-memory theme and remain on disk for repair.
 Writes use atomic replacement and preserve existing links and permissions.
-An explicit mode Set updates supported desktop targets with readback; if application
-fails, the service restores the previous theme record and returns the error.
-Editing the theme record itself never applies desktop settings.
+Theme controls write the same Core-owned preferences in every participating app.
+Core emits `Changed("theme", …)` or `Changed("accent", …)` so running apps can
+apply edits. The theme file and ordinary theme operations affect Remya apps only.
 
 ## System targets
+
+Settings exposes an explicit Apply to system action. It passes the current
+Remya light or dark mode to the system appearance backend. Accent, palette style
+and contrast apply to Remya apps. A successful action writes the verified desktop
+mode to `remya/system/appearance.toml`. Core tracks changes to that snapshot
+independently of the shared Remya theme. Use `Resolve appearance system` to
+adopt the current desktop mode into the snapshot or `Resolve appearance settings`
+to reapply the saved desktop mode.
+
 
 GNOME uses the interface GSettings color scheme. GTK 3 uses its dark-theme key;
 GTK 4 uses `gtk-interface-color-scheme`. Existing light/dark theme variants are
@@ -44,8 +62,16 @@ Other Qt styles and portal availability retain their existing platform behavior.
 
 Environment blocks preserve unrelated content, reject duplicate/incomplete markers,
 and undergo syntax validation before application. Appearance updates use a
-cross-process lock under `remya/shared/`. Debug preference roots do not isolate
+cross-process lock under `remya/shared/`. The desktop snapshot and toolkit
+changes use the same verified transaction and rollback. Debug preference roots do not isolate
 explicit host appearance writes; tests use injected temporary contexts.
+
+`system_theme::tests` verifies isolated GNOME and GTK readback, transaction
+rollback and validation of the managed desktop snapshot. Run
+`python tests/interface_smoke.py --theme` to verify CLI and D-Bus parity,
+contrast persistence, desktop isolation and explicit application with a private
+session bus and XDG/GSettings roots.
+
 
 ## Application-owned preferences
 

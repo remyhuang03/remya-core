@@ -5136,10 +5136,10 @@
       "id": "themes",
       "category": "appearance",
       "title": "Colors and themes",
-      "description": "Light and dark mode, accent color, Material palette and icon theme",
+      "description": "Light and dark mode, accent color, Material palette, contrast and icon theme",
       "preview": "none",
       "availability": "available",
-      "reason": "Light/Dark, accent color, Material palette and icon themes use the Settings service and the app configuration.",
+      "reason": "Core shares the Material theme across Remy'a apps. System theme mode and icon themes are applied separately.",
       "sources": [
         "uris",
         "gtk3-appearance",
@@ -5159,10 +5159,10 @@
           "controls": [
             {
               "id": "themes.material-theme-mode",
-              "title": "Dark theme",
+              "title": "Theme mode",
               "type": "choice",
               "availability": "available",
-              "reason": "Changes GNOME, installed GTK toolkits, and documented Qt Quick Light/Dark defaults through the Rust backend.",
+              "reason": "Selects Light or Dark for all Remy'a apps.",
               "value": "Light",
               "options": [
                 "Light",
@@ -5186,7 +5186,7 @@
               "title": "Accent Color",
               "type": "color",
               "availability": "available",
-              "reason": "Seed for the Material color scheme of Remya applications.",
+              "reason": "Seed for the Material color scheme of Remy'a applications.",
               "value": "#8054C9"
             },
             {
@@ -5194,7 +5194,7 @@
               "title": "Material style variant",
               "type": "choice",
               "availability": "available",
-              "reason": "Applies to Remy'a Settings and is saved in its app configuration.",
+              "reason": "Selects the Material palette style for all Remy'a apps.",
               "value": "Tonal spot",
               "options": [
                 "Tonal spot",
@@ -5207,6 +5207,32 @@
                 "Rainbow",
                 "Fruit salad"
               ]
+            },
+            {
+              "id": "themes.material-contrast",
+              "title": "Contrast",
+              "type": "choice",
+              "availability": "available",
+              "reason": "Adjusts contrast between Material colors in all Remy'a apps.",
+              "value": "Standard",
+              "options": [
+                "Standard",
+                "Medium",
+                "High"
+              ]
+            }
+          ]
+        },
+        {
+          "title": "System theme",
+          "controls": [
+            {
+              "id": "themes.apply-to-system",
+              "title": "Apply to system",
+              "type": "action",
+              "availability": "available",
+              "reason": "Applies the current Remy'a Light or Dark mode to supported GNOME, GTK and Qt Quick toolkits. The accent, palette style and contrast apply to Remy'a apps.",
+              "value": "Apply"
             }
           ]
         },
@@ -7952,7 +7978,7 @@
               "title": "Change avatar",
               "type": "action",
               "availability": "available",
-              "reason": "Crop and zoom an image, then atomically save a 512 × 512 PNG owned by Settings; no desktop avatar or login changes.",
+              "reason": "Crop and zoom an image to save the shared Remy'a avatar as a 512 × 512 PNG.",
               "value": "Configuration"
             },
             {

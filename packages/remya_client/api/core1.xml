@@ -73,6 +73,12 @@
        Package operations use the existing authorized private helper, never the system updater.
        See docs/public-api.md and docs/storage.md for payload bounds and deletion semantics. -->
   <interface name="top.remya.Core1">
+    <!-- theme returns shared style_variant, theme_mode and contrast. Get/Set
+         themes.material-contrast supports standard|medium|high. Ordinary shared theme
+         writes affect Remya apps. Set themes.apply-to-system apply explicitly applies
+         light/dark to supported desktop toolkits. Get/Manage/Resolve appearance
+         track that independent system snapshot; Changed theme, accent and appearance
+         publish updates to the corresponding state. -->
     <!-- system-information returns api_version and per-ID value/error observations;
          its 16 about.* info fields reject Set with ReadOnly. about is app metadata.
          hostname reads static/runtime/saved names and conflict state.
@@ -101,7 +107,7 @@
          Set bluetooth.* accepts JSON requests, including pairing responses and cancellation.
          Changed bluetooth reports verified state and Agent prompts; see docs/public-api.md.
          No Bluetooth preferences or keys are persisted by Settings. -->
-    <!-- Get account-information reads the service username and Settings-owned avatar.
+    <!-- Get account-information reads the service username and shared Remya avatar.
          The username readout rejects Set; Set your-info.58484bbb accepts an image path
          and normalized crop rectangle. Changed account-information reports avatar updates. -->
     <!-- System updates is paused work in progress. Get updates / updates.* remains inspectable.

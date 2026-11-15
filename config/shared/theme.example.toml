@@ -5,6 +5,7 @@ version = 1
 # tonal_spot, fidelity, monochrome, neutral, vibrant, expressive,
 # content, rainbow, fruit_salad
 style_variant = "tonal_spot"
-# Last selected mode: light or dark. Startup reads the actual system preference.
-# Editing this record does not write desktop settings; select Light/Dark in the app.
+# Light or dark for Remya apps. Settings has a separate Apply to system action.
 theme_mode = "light"
+# standard, medium, high
+contrast = "standard"

@@ -1,10 +1,11 @@
 use crate::paths::Roots;
 use crate::privileged::{Request, Session};
+use crate::shared_theme::{self, CONTRAST, MODE, STYLE};
 use gio::glib::{Variant, variant::ToVariant};
 use gio::prelude::AppInfoExt;
-use remya_appearance as appearance;
 use remya_appearance::packs::{self, ThemePacks};
 use remya_appearance::text_size::{self, TextSize};
+use remya_appearance::{APPLY_TO_SYSTEM, DesktopTheme, SystemThemeMode};
 use remya_applications as applications;
 use remya_background::{
     BackgroundManager, RealDesktop, is_accent_setting, is_background_setting, manager::Paths,
@@ -33,8 +34,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-pub const STYLE: &str = "themes.material-style-variant";
-pub const MODE: &str = "themes.material-theme-mode";
 pub fn linked_page(id: &str) -> Option<&'static str> {
     match id {
         "power.743773bd" => Some("battery-saver"),
@@ -48,17 +47,6 @@ pub const MANUAL: &str = "date-time.6422d209";
 pub const AUTO: &str = "date-time.db451de3";
 pub const SYNC: &str = "date-time.098d06ec";
 pub const SERVERS: &str = "date-time.7e33a213";
-const STYLES: &[&str] = &[
-    "tonal_spot",
-    "fidelity",
-    "monochrome",
-    "neutral",
-    "vibrant",
-    "expressive",
-    "content",
-    "rainbow",
-    "fruit_salad",
-];
 fn invalid(message: &str) -> String {
     format!("InvalidArgument:{message}")
 }
@@ -89,47 +77,6 @@ fn load(path: &std::path::Path) -> Result<Option<Value>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.to_string()),
     }
-}
-
-fn normalize_theme(value: Value) -> Result<Value, String> {
-    let object = value
-        .as_object()
-        .ok_or("Invalid appearance configuration")?;
-    if value["version"] != 1
-        || object
-            .keys()
-            .any(|k| !["version", "theme"].contains(&k.as_str()))
-    {
-        return Err("Invalid appearance configuration".into());
-    }
-    let empty = json!({});
-    let theme = if value["theme"].is_null() {
-        &empty
-    } else {
-        &value["theme"]
-    };
-    if theme.as_object().is_none_or(|m| {
-        m.keys()
-            .any(|k| !["style_variant", "theme_mode"].contains(&k.as_str()))
-    }) {
-        return Err("Invalid theme table".into());
-    }
-    let style = if theme["style_variant"].is_null() {
-        "tonal_spot"
-    } else {
-        theme["style_variant"]
-            .as_str()
-            .ok_or("Invalid Material style")?
-    };
-    let mode = if theme["theme_mode"].is_null() {
-        "light"
-    } else {
-        theme["theme_mode"].as_str().ok_or("Invalid theme mode")?
-    };
-    if !STYLES.contains(&style) || !["light", "dark"].contains(&mode) {
-        return Err("Invalid Material style or theme mode".into());
-    }
-    Ok(json!({"version":1,"theme":{"style_variant":style,"theme_mode":mode}}))
 }
 
 /// Hyprland reads `$XDG_CONFIG_HOME/hypr`; relative XDG values are ignored.
@@ -175,7 +122,7 @@ fn background_paths(roots: &Roots) -> Paths {
 pub struct State {
     pub catalog: Value,
     pub theme: Value,
-    pub system: Value,
+    pub appearance: DesktopTheme,
     pub date: Value,
     pub hostname: HostnameManager,
     pub account: AccountInformation,
@@ -223,8 +170,8 @@ impl State {
         Self {
             catalog,
             requests,
-            theme: json!({"version":1,"theme":{"style_variant":"tonal_spot","theme_mode":"light"}}),
-            system: json!({"mode":null,"targets":[]}),
+            theme: shared_theme::defaults("light"),
+            appearance: DesktopTheme::new(roots.system.join("appearance.toml")),
             date: json!({}),
             hostname: HostnameManager::new(roots.system.join("hostname.toml"), atomic_write),
             account: AccountInformation::new(roots.system.join("avatar.png")),
@@ -307,6 +254,7 @@ impl State {
     }
     pub fn refresh(&mut self) {
         self.requests.apps.lock().unwrap().rescan();
+        self.appearance.refresh();
         self.theme_error = self.refresh_theme().err();
         self.date_error = self.refresh_date().err();
         let _ = self.hostname.refresh();
@@ -329,21 +277,17 @@ impl State {
         let _ = self.cameras.refresh();
     }
     fn refresh_theme(&mut self) -> Result<(), String> {
-        let system =
-            serde_json::to_value(appearance::read_system_theme()?).map_err(|e| e.to_string())?;
-        let loaded = if let Some(value) = load(&self.config)? {
-            value
+        self.theme = if let Some(value) = load(&self.config)? {
+            shared_theme::normalize(value)?
         } else {
-            let mode = system["mode"]
-                .as_str()
-                .ok_or("System appearance cannot be detected")?;
-            let v = json!({"version":1,"theme":{"style_variant":"tonal_spot","theme_mode":mode}});
-            write(&self.config, &v)?;
-            v
+            let mode = match self.appearance.system().mode {
+                Some(SystemThemeMode::Dark) => "dark",
+                _ => "light",
+            };
+            let defaults = shared_theme::defaults(mode);
+            write(&self.config, &defaults)?;
+            defaults
         };
-        let loaded = normalize_theme(loaded)?;
-        self.theme = loaded;
-        self.system = system;
         Ok(())
     }
     fn refresh_date(&mut self) -> Result<(), String> {
@@ -517,7 +461,7 @@ impl State {
     pub fn configuration(&self) -> Value {
         let mut date = self.date.clone();
         date["error"] = json!(self.date_error.as_ref().or(self.auth_error.as_ref()));
-        json!({"appearance":{"saved":self.theme["theme"]["theme_mode"],"system":self.system["mode"],"conflict":self.theme["theme"]["theme_mode"]!=self.system["mode"],"error":self.theme_error},"date-time":date,"display":self.display.state(),"night-light":self.night_light.state(),"hostname":self.hostname_state(),"background":self.background.state(),"default-apps":self.default_apps.state(),"startup":self.startup.state(),"input":self.input.state(),"language":self.language.state(),"desktop":self.desktop.state(),"themes":self.themes.state(),"text-size":self.text_size.state(),"network":self.network.state(),"sound":self.sound.state(),"power":self.power.state(),"cameras":self.cameras.state()})
+        json!({"appearance": self.appearance.state(),"date-time":date,"display":self.display.state(),"night-light":self.night_light.state(),"hostname":self.hostname_state(),"background":self.background.state(),"default-apps":self.default_apps.state(),"startup":self.startup.state(),"input":self.input.state(),"language":self.language.state(),"desktop":self.desktop.state(),"themes":self.themes.state(),"text-size":self.text_size.state(),"network":self.network.state(),"sound":self.sound.state(),"power":self.power.state(),"cameras":self.cameras.state()})
     }
     pub fn controls(&self) -> Vec<&Value> {
         self.catalog["pages"]
@@ -539,17 +483,23 @@ impl State {
                         Ok(self.theme.clone())
                     }
                     "appearance" => {
-                        self.refresh_theme()?;
-                        Ok(self.configuration()["appearance"].clone())
+                        self.appearance.refresh();
+                        Ok(self.appearance.state())
                     }
                     "system" => {
-                        self.refresh_theme()?;
-                        Ok(self.system.clone())
+                        self.appearance.refresh();
+                        serde_json::to_value(self.appearance.system()).map_err(|error| error.to_string())
                     }
-                    STYLE | MODE => {
+                    APPLY_TO_SYSTEM => {
+                        self.appearance.refresh();
+                        let mut control = self.controls().into_iter().find(|c| c["id"] == key).unwrap().clone();
+                        control["appearance"] = self.appearance.state();
+                        Ok(control)
+                    }
+                    STYLE | MODE | CONTRAST => {
                         self.refresh_theme()?;
                         Ok(
-                            json!({"id": key,"availability":"available","reason":self.controls().into_iter().find(|c|c["id"]==key).unwrap()["reason"],"value":self.theme["theme"][if key==STYLE{"style_variant"}else{"theme_mode"}]}),
+                            json!({"id": key,"availability":"available","reason":self.controls().into_iter().find(|c|c["id"]==key).unwrap()["reason"],"value":self.theme["theme"][shared_theme::field(key).unwrap()]}),
                         )
                     }
                     "configuration" => {
@@ -864,7 +814,7 @@ impl State {
                         Ok(field)
                     }
                     "about" => Ok(
-                        json!({"name":"Remya Core","version":env!("CARGO_PKG_VERSION"),"repository":"https://github.com/remyhuang03/remya-core","license":"PolyForm-Noncommercial-1.0.0","api_version":1}),
+                        json!({"name":"Remy'a Core","version":env!("CARGO_PKG_VERSION"),"repository":"https://github.com/remyhuang03/remya-core","license":"PolyForm-Noncommercial-1.0.0","api_version":1}),
                     ),
                     "catalog" => {
                         let mut v = self.catalog.clone();
@@ -948,7 +898,7 @@ impl State {
                     return Err(error.clone());
                 }
                 Ok(
-                    json!({"theme":self.theme,"system":self.system,"configuration":self.configuration()}),
+                    json!({"theme":self.theme,"system":self.appearance.system(),"configuration":self.configuration()}),
                 )
             }
             "Restart" => {
@@ -1189,33 +1139,27 @@ impl State {
                 _ => Err("ReadOnly:Use get font-search:<query> or get font:<family>".into()),
             };
         }
-        if [STYLE, MODE].contains(&key) {
+        if key == APPLY_TO_SYSTEM {
+            if value != "apply" {
+                return Err(invalid(
+                    "Use apply to apply the Remy'a theme mode to the system",
+                ));
+            }
             self.refresh_theme()?;
-            let before = self.theme.clone();
-            let mut next = before.clone();
-            if key == STYLE {
-                if !STYLES.contains(&value) {
-                    return Err(invalid("Invalid style"));
-                }
-                next["theme"]["style_variant"] = json!(value);
+            let mode = if self.theme["theme"]["theme_mode"] == "dark" {
+                SystemThemeMode::Dark
             } else {
-                if !["light", "dark"].contains(&value) {
-                    return Err(invalid("Invalid mode"));
-                }
-                next["theme"]["theme_mode"] = json!(value);
-            }
-            write(&self.config, &next)?;
-            if key == MODE
-                && let Err(error) = appearance::apply_system_theme(if value == "dark" {
-                    appearance::SystemThemeMode::Dark
-                } else {
-                    appearance::SystemThemeMode::Light
-                })
-            {
-                write(&self.config, &before)?;
-                return Err(error);
-            }
+                SystemThemeMode::Light
+            };
+            return self.appearance.apply(mode);
+        }
+        if let Some(field) = shared_theme::field(key) {
             self.refresh_theme()?;
+            let mut next = self.theme.clone();
+            next["theme"][field] = json!(value);
+            let next = shared_theme::normalize(next).map_err(|error| invalid(&error))?;
+            write(&self.config, &next)?;
+            self.theme = next;
             self.theme_error = None;
             return Ok(self.theme.clone());
         }
@@ -1299,10 +1243,7 @@ impl State {
             "cleanup" => self.storage.manage()?,
             "appimages" => self.appimages.manage()?,
             "updates" => self.updates.manage()?,
-            "appearance" => {
-                self.refresh_theme()?;
-                return Ok(self.configuration()["appearance"].clone());
-            }
+            "appearance" => return self.appearance.manage(),
             "date-time" => {
                 self.refresh_date()?;
                 let mut snapshot = self.saved.clone();
@@ -1382,28 +1323,7 @@ impl State {
             return Err(invalid("Unknown resolution"));
         }
         match feature {
-            "appearance" => {
-                self.refresh_theme()?;
-                let mode = if source == "system" {
-                    self.system["mode"]
-                        .as_str()
-                        .ok_or("Unknown system appearance")?
-                        .to_owned()
-                } else {
-                    self.theme["theme"]["theme_mode"]
-                        .as_str()
-                        .unwrap()
-                        .to_owned()
-                };
-                if source == "system" {
-                    let mut value = self.theme.clone();
-                    value["theme"]["theme_mode"] = json!(mode);
-                    write(&self.config, &value)?;
-                    self.refresh_theme()?;
-                } else {
-                    self.set(MODE, &mode)?;
-                }
-            }
+            "appearance" => return self.appearance.resolve(source),
             "date-time" => {
                 self.refresh_date()?;
                 if source == "system" {
@@ -1490,7 +1410,7 @@ impl State {
                 .and_then(|app| app.commandline())
                 .and_then(|command| settings_executable(&command.to_string_lossy()))
                 .or_else(|| gio::glib::find_program_in_path("remya_settings"))
-                .ok_or("Unavailable:Remya Settings is not installed")?;
+                .ok_or("Unavailable:Remy'a Settings is not installed")?;
             self.gui = Some(
                 Command::new(binary)
                     .args(["--gui", &self.navigation])
@@ -1513,22 +1433,6 @@ impl Drop for State {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn theme_schema_matches_existing_client_defaults_and_validation() {
-        assert_eq!(
-            normalize_theme(json!({"version":1})).unwrap()["theme"]["style_variant"],
-            "tonal_spot"
-        );
-        assert!(normalize_theme(json!({"version":1,"theme":{"theme_mode":"system"}})).is_err());
-        for value in [
-            json!({"version":2}),
-            json!({"version":1,"unknown":true}),
-            json!({"version":1,"theme":{"unknown":true}}),
-            json!({"version":1,"theme":{"theme_mode":true}}),
-        ] {
-            assert!(normalize_theme(value).is_err());
-        }
-    }
     #[test]
     fn atomic_preferences_preserve_links_permissions_and_reject_malformed_files() {
         use std::os::unix::fs::PermissionsExt;

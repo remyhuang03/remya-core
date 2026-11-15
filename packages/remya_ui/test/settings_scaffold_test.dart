@@ -2,12 +2,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:remya_ui/settings_ui.dart';
 
-RemyaSettingsPage _leaf(String id) => RemyaSettingsPage(
-  id: id,
-  title: 'Title $id',
-  icon: Icons.tune_rounded,
-  builder: (_) => Text('Body $id'),
-);
+RemyaSettingsPage _leaf(String id, {RemyaSettingsCategory? category}) =>
+    RemyaSettingsPage(
+      id: id,
+      category: category,
+      title: 'Title $id',
+      icon: Icons.tune_rounded,
+      builder: (_) => Text('Body $id'),
+    );
 
 final _pages = [
   _leaf('layout'),
@@ -45,6 +47,60 @@ Future<List<String>> _show(WidgetTester tester, String selected) async {
 }
 
 void main() {
+  testWidgets('sidebar groups interleaved pages under their category titles', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 800);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RemyaSettingsScaffold(
+          pages: [
+            _leaf('layout', category: .personalization),
+            _leaf('alerts', category: .system),
+            _leaf('theme', category: .personalization),
+            _leaf('account', category: .privacy),
+          ],
+          selected: 'alerts',
+          onSelected: (_) {},
+        ),
+      ),
+    );
+
+    final personalization = find.byKey(
+      const ValueKey('nav-group-personalization'),
+    );
+    final system = find.byKey(const ValueKey('nav-group-system'));
+    final layout = find.byKey(const ValueKey('nav-layout'));
+    final theme = find.byKey(const ValueKey('nav-theme'));
+    final alerts = find.byKey(const ValueKey('nav-alerts'));
+    expect(
+      find.descendant(of: personalization, matching: layout),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: personalization, matching: theme),
+      findsOneWidget,
+    );
+    expect(find.descendant(of: system, matching: alerts), findsOneWidget);
+    expect(tester.getTopLeft(theme).dy, lessThan(tester.getTopLeft(alerts).dy));
+    expect(find.text('Personalization'), findsOneWidget);
+    expect(find.text('Device & system'), findsOneWidget);
+    expect(find.text('Accounts & privacy'), findsOneWidget);
+    expect(find.text('Body alerts'), findsOneWidget);
+
+    tester.view.physicalSize = const Size(780, 800);
+    await tester.pumpAndSettle();
+    expect(find.text('Personalization'), findsNothing);
+    expect(
+      find.descendant(of: personalization, matching: theme),
+      findsOneWidget,
+    );
+    expect(tester.getTopLeft(theme).dy, lessThan(tester.getTopLeft(alerts).dy));
+  });
+
   testWidgets('a parent shows its first child under the parent title', (
     tester,
   ) async {

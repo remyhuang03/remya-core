@@ -8,13 +8,17 @@ import 'theme.dart';
 import 'package:remya_client/settings_contract.dart';
 
 class SettingsThemeController extends ChangeNotifier {
-  SettingsThemeController(this.resolveFile) : _client = null;
+  SettingsThemeController(this.resolveFile)
+    : _client = null,
+      _ownsClient = false;
   SettingsThemeController.service({SettingsClient? client})
     : resolveFile = null,
-      _client = client ?? SettingsClient();
+      _client = client ?? SettingsClient(),
+      _ownsClient = client == null;
 
   final File Function()? resolveFile;
   final SettingsClient? _client;
+  final bool _ownsClient;
   StreamSubscription? _changes;
   RemyaTheme theme = const .new();
   String? error;
@@ -69,6 +73,7 @@ class SettingsThemeController extends ChangeNotifier {
       );
     }
     await reload();
+    if (_disposed) return;
     // Atomic replacements and directories created after startup are both seen.
     _timer = Timer.periodic(
       Duration(milliseconds: _client == null ? 500 : 2000),
@@ -126,7 +131,7 @@ class SettingsThemeController extends ChangeNotifier {
     _disposed = true;
     _timer?.cancel();
     _changes?.cancel();
-    _client?.close();
+    if (_ownsClient) _client!.close();
     super.dispose();
   }
 }

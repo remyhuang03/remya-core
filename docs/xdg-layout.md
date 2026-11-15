@@ -13,7 +13,7 @@ Only absolute XDG roots are used. Missing or relative values fall back to absolu
 | State | `$XDG_STATE_HOME/remya/core/` | `<repo>/config/state/` |
 
 System filenames remain `display.toml`, `night-light.toml`, `input.toml`,
-`desktop.toml`, `themes.toml`, `text-size.toml`, `language.toml`, `hostname.toml`,
+`desktop.toml`, `appearance.toml` (desktop light/dark snapshot), `themes.toml`, `text-size.toml`, `language.toml`, `hostname.toml`,
 `default-apps.toml`, `startup.toml`, `network.toml`, `background.toml`, `power.json`,
 `power.runtime.json`, `cameras.toml`, `date-time.toml`, `cleanup.toml`,
 `appimages.toml`, `updates.json`, and the user-selected `avatar.png`.

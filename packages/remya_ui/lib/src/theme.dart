@@ -2,6 +2,8 @@ import 'package:material_ui/material_ui.dart';
 
 import 'package:remya_client/settings_contract.dart';
 
+export 'package:remya_client/settings_contract.dart' show MaterialContrast;
+
 extension MaterialStyleKey on DynamicSchemeVariant {
   String get configKey => name.replaceAllMapped(
     RegExp('[A-Z]'),
@@ -9,11 +11,12 @@ extension MaterialStyleKey on DynamicSchemeVariant {
   );
 }
 
-/// Shared with the settings writer. The bar only reads this configuration.
+/// The shared Material color scheme used by Remya applications.
 class RemyaTheme {
   const RemyaTheme({
     this.styleVariant = .tonalSpot,
     this.mode = .light,
+    this.contrast = .standard,
     this.seedColor = defaultSeed,
   });
 
@@ -29,6 +32,7 @@ class RemyaTheme {
 
   final DynamicSchemeVariant styleVariant;
   final ThemeMode mode;
+  final MaterialContrast contrast;
   final Color seedColor;
 
   factory RemyaTheme.parse(String content) =>
@@ -42,6 +46,7 @@ class RemyaTheme {
       (value) => value.configKey == config.styleVariant,
     ),
     mode: config.mode == 'dark' ? .dark : .light,
+    contrast: config.contrast,
     seedColor: seedFromHex(config.seedColor),
   );
 
@@ -51,6 +56,7 @@ class RemyaTheme {
       seedColor: seedColor,
       brightness: brightness,
       dynamicSchemeVariant: styleVariant,
+      contrastLevel: contrast.level,
     ),
     iconButtonTheme: const .new(variant: .material3Expressive),
     fontFamilyFallback: const [

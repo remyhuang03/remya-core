@@ -12,6 +12,7 @@ class RemyaSettingsPage {
     required this.id,
     required this.title,
     required this.icon,
+    this.category,
     this.builder,
     this.children = const [],
     this.tabs = true,
@@ -21,6 +22,7 @@ class RemyaSettingsPage {
   final String id;
   final String title;
   final IconData icon;
+  final RemyaSettingsCategory? category;
 
   /// Builds the page content below the header; null for a page with children.
   final WidgetBuilder? builder;
@@ -34,8 +36,9 @@ class RemyaSettingsPage {
 /// The settings window layout of Remya applications, identical to Remy'a
 /// Settings: sidebar, page header with sibling tabs and the content frame.
 ///
-/// [pages] share one rounded sidebar group; [footerPages] (usually About)
-/// follow as standalone items. [selected] is the id of any page or subpage;
+/// [pages] are grouped by category in the shared sidebar order. Pages with no
+/// category share an untitled group. [footerPages] (usually About) follow as
+/// standalone items. [selected] is the id of any page or subpage;
 /// selecting a page with children shows its first child. The scaffold does
 /// not own navigation: [onSelected] reports the id to show. [onBack], when
 /// set, adds a Back button to the header and the Alt+Left shortcut.
@@ -87,6 +90,10 @@ class RemyaSettingsScaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     final (:entry, :leaf) = _resolve();
     final tabs = entry.tabs && entry.children.length > 1;
+    final groups = <RemyaSettingsCategory?, List<RemyaSettingsPage>>{};
+    for (final page in pages) {
+      (groups[page.category] ??= []).add(page);
+    }
     Widget item(RemyaSettingsPage page, bool compact, Widget icon) =>
         RemyaSidebarItem(
           key: ValueKey('nav-${page.id}'),
@@ -109,13 +116,21 @@ class RemyaSettingsScaffold extends StatelessWidget {
         sidebar: (compact) => RemyaSidebar(
           compact: compact,
           children: [
-            RemyaSidebarGroup(
-              compact: compact,
-              children: [
-                for (final page in pages)
-                  item(page, compact, RemyaSidebarIcon(page.icon)),
-              ],
-            ),
+            for (final category in [...RemyaSettingsCategory.values, null])
+              if (groups[category] case final group?)
+                RemyaSidebarGroup(
+                  key: ValueKey('nav-group-${category?.name ?? 'other'}'),
+                  title: category?.title,
+                  compact: compact,
+                  children: [
+                    for (final page in group)
+                      item(
+                        page,
+                        compact,
+                        RemyaSidebarIcon(page.icon, category: category),
+                      ),
+                  ],
+                ),
             if (footerPages.isNotEmpty) const SizedBox(height: 6),
             for (final page in footerPages)
               item(page, compact, Icon(page.icon, size: 22)),

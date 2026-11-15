@@ -13,7 +13,7 @@
 
 ## Architecture
 - Rust crates live in `crates/<feature>/` under the root `Cargo.toml` workspace. Group backend functionality by feature; create crates only for concrete responsibility or dependency boundaries. `crates/service` is the daemon; do not turn it into a catch-all for feature logic.
-- Keep the Flutter-free daemon free of UI concerns. `packages/remya_client` stays pure Dart (no Flutter); `packages/remya_ui` holds the theme adapter, shared identity assets and the app-agnostic settings-window components (`lib/settings_ui.dart`) that give every Remya settings window the Settings look; it holds no settings pages, catalog logic or backend dependency.
+- Keep the Flutter-free daemon free of UI concerns. `packages/remya_client` stays pure Dart (no Flutter); `packages/remya_ui` holds the theme adapter, shared identity assets and the app-agnostic settings-window components (`lib/settings_ui.dart`) that give every Remya settings window the Settings look; it can provide reusable editors for shared Remya preferences through the public Dart client. System and app-owned pages, catalog logic and native backend code stay outside the UI package.
 - Applications consume the packages through a git dependency pinned to a tag. Local development uses a gitignored `pubspec_overrides.yaml` pointing at a local checkout.
 
 ## Public Interfaces

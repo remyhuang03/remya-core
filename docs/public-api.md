@@ -113,12 +113,14 @@ in one message. `List` starts with cursor `"0"` and returns up to 32 controls,
 pagination is automatic. Invalid or out-of-range cursors fail. Search uses the
 same all-terms, case-insensitive matching as the GUI.
 
-Available system preferences are writable through both interfaces; System information fields are read-only:
+Available system and shared preferences are writable through both interfaces; System information fields are read-only:
 
 | Setting ID | Accepted values |
 | --- | --- |
 | `themes.material-style-variant` | `tonal_spot`, `fidelity`, `monochrome`, `neutral`, `vibrant`, `expressive`, `content`, `rainbow`, `fruit_salad` |
-| `themes.material-theme-mode` | `light`, `dark` |
+| `themes.material-theme-mode` | `light`, `dark` for Remya apps |
+| `themes.material-contrast` | `standard`, `medium`, `high` for Remya apps |
+| `themes.apply-to-system` | `apply` to apply the current Remya light or dark mode to supported desktop targets |
 | `date-time.fb2a23dc` | Installed time zone ID from `get timezones` |
 | `date-time.db451de3` | `true`, `false` |
 | `date-time.098d06ec` | `sync` (automatic time must be enabled) |
@@ -136,6 +138,8 @@ the common dispatcher and parity tests as part of implementing the GUI control.
 remya get theme
 remya set themes.material-style-variant vibrant
 remya set themes.material-theme-mode dark
+remya set themes.material-contrast medium
+remya set themes.apply-to-system apply
 remya search 'material'
 remya open themes
 remya watch all
@@ -152,12 +156,20 @@ gdbus call --session --dest top.remya.Core1 \
 Example theme response:
 
 ```json
-{"version":1,"theme":{"style_variant":"vibrant","theme_mode":"dark"}}
+{"version":1,"theme":{"style_variant":"vibrant","theme_mode":"dark","contrast":"medium"}}
 ```
 
 `system` returns `mode` (`light`, `dark`, or `null`) and `targets`, each with
 `name`, `status`, and `detail`. Statuses are `detected`, `applied`, `unchanged`, or
 `unavailable`. Target detection does not imply universal desktop propagation.
+
+Ordinary Material theme writes affect Remya apps. An explicit
+`Set themes.apply-to-system apply` applies the current Remya light or dark mode to
+supported GNOME, GTK and Qt Quick targets. Its response matches `Get appearance`
+with `saved`, `system`, `conflict`, `error` and target details. `saved` is null
+until the system feature is managed. `Resolve appearance system|settings`
+adopts the observed desktop mode or reapplies the saved desktop mode. System
+appearance operations emit `Changed("appearance", json)`.
 
 ## Changes, errors, and concurrency
 
@@ -200,7 +212,9 @@ settings instance per session. Read-only operations do not write system settings
 `packages/remya_client` is the pure Dart source dependency. Import
 `remya_client.dart` or `settings_contract.dart` for `SettingsClient` and feature
 extensions. `SettingsClient.manage(feature)` calls Manage; `call` exposes every
-Core1 operation. Shared Flutter theme and identity adapters live in `packages/remya_ui`; Settings pages remain in the GUI repository.
+Core1 operation. Shared Flutter theme, identity adapters and settings pages live in
+`packages/remya_ui`. Applications opt into the shared Material theme page through
+`remyaMaterialThemePage`. Settings embeds the same editor alongside system controls.
 The shared theme TOML still contains version and `[theme]` only; accent and custom
 AI endpoints have independent shared files.
 
@@ -906,13 +920,13 @@ configuration snapshot or `Resolve` operation; see [Bluetooth](bluetooth.md) for
 state ownership and the explicit hardware verification limits.
 
 
-## Account information and Settings avatar
+## Account information and Remya avatar
 
 | CLI | D-Bus | Result |
 | --- | --- | --- |
 | `get account-information` | `Get("account-information")` | `api_version`, read-only `username`, nullable `avatar_path`/`avatar_revision`, and nullable `error` |
 | `get your-info.a1aaf352` | `Get(id)` | Service user's GLib/NSS username and the same account state |
-| `get your-info.58484bbb` | `Get(id)` | Saved Settings avatar path and the same account state |
+| `get your-info.58484bbb` | `Get(id)` | Saved shared Remya avatar path and the same account state |
 | `set your-info.58484bbb <json>` | `Set(id, json)` | Updated account state after atomic avatar persistence |
 
 Avatar JSON is `{"path":"/absolute/image.png","crop":{"left":0,"top":0,"right":1,"bottom":1}}`. Crop edges are finite normalized coordinates in the source image after EXIF orientation; require `0 <= left < right <= 1` and `0 <= top < bottom <= 1`. PNG, JPEG and WebP input is bounded to 32 MiB, 64 megapixels and 16,384 pixels per side. The ordinary-user Rust service decodes, crops and resizes with system GdkPixbuf and saves a 512 × 512 PNG at the system-root `avatar.png` (see [XDG layout](xdg-layout.md)). No source image is changed or retained. Invalid input, unsupported decoding and failed persistence leave the last saved avatar intact. Avatar destination symlinks are rejected.
@@ -921,7 +935,7 @@ Avatar JSON is `{"path":"/absolute/image.png","crop":{"left":0,"top":0,"right":1
 GUI cropping and input behavior are documented in the
 [Settings client](../../remya-settings/docs/gui-client.md#avatar-editor).
 
-Username rejects Set with ReadOnly. `Changed("account-information", state)` reports avatar changes through the same versioned interface; `AccountInformationClient` supplies pure Dart helpers. The avatar is app-owned data: it has no system counterpart, reconciliation or elevation, does not change a desktop/account picture, and does not enable login. Manage Account and Login options remain unavailable previews.
+Username rejects Set with ReadOnly. `Changed("account-information", state)` reports avatar changes through the same versioned interface; `AccountInformationClient` supplies pure Dart helpers. Remya Settings and Remya Bar can edit the same picture with the shared avatar editor. The write affects only Remya’s picture and runs with ordinary user permissions. Manage Account and Login options remain unavailable previews.
 
 ## Sound
 

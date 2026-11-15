@@ -421,6 +421,46 @@ def app_preferences_session():
         service.wait(timeout=10)
 
 
+def theme_checks():
+    initial_system = cli('get', 'system')['mode']
+    assert cli('get', 'appearance')['saved'] is None
+    assert cli('set', 'themes.material-style-variant', 'vibrant')['theme']['style_variant'] == 'vibrant'
+    assert dbus('Set', 'themes.material-theme-mode', 'dark')['theme']['theme_mode'] == 'dark'
+    assert cli('get', 'system')['mode'] == initial_system
+    assert cli('get', 'appearance')['saved'] is None
+    contrast = 'themes.material-contrast'
+    assert cli('get', contrast)['value'] == 'standard'
+    assert cli('set', contrast, 'medium')['theme']['contrast'] == 'medium'
+    assert dbus('Set', contrast, 'high')['theme']['contrast'] == 'high'
+    assert cli('get', contrast) == dbus('Get', contrast)
+    assert 'InvalidArgument' in cli('set', contrast, 'maximum', ok=False)
+    assert cli('get', contrast)['value'] == 'high'
+    applied = dbus('Set', 'themes.apply-to-system', 'apply')
+    assert applied['saved'] == applied['system'] == 'dark' and not applied['conflict']
+    assert cli('get', 'system')['mode'] == 'dark'
+    assert cli('set', 'themes.material-theme-mode', 'light')['theme']['theme_mode'] == 'light'
+    assert cli('get', 'system')['mode'] == 'dark'
+    assert not cli('get', 'appearance')['conflict']
+
+def theme_session():
+    service = subprocess.Popen([str(ROOT / 'target/release/remyad')])
+    try:
+        for _ in range(50):
+            if subprocess.run(
+                ['gdbus', 'call', '--session', '--dest', 'org.freedesktop.DBus',
+                 '--object-path', '/org/freedesktop/DBus', '--method',
+                 'org.freedesktop.DBus.NameHasOwner', 'top.remya.Core1'],
+                capture_output=True, text=True, check=True,
+            ).stdout == '(true,)\n':
+                break
+            time.sleep(0.1)
+        theme_checks()
+        print('PASS: CLI/D-Bus shared theme contrast, desktop isolation, and explicit system application')
+    finally:
+        service.terminate()
+        service.wait(timeout=10)
+
+
 def session_checks():
     pid = None
     watcher = None
@@ -481,9 +521,7 @@ def session_checks():
         assert not cli('resolve', 'date-time', 'system')['date-time']['conflict']
         assert cli('get', 'date-time')['timezone'] == clock['timezone']
         assert not any(client['pid'] == pid for client in json.loads(subprocess.check_output(['hyprctl', 'clients', '-j']))), 'Background service showed a window'
-        assert cli('set', 'themes.material-style-variant', 'vibrant')['theme']['style_variant'] == 'vibrant'
-        assert dbus('Set', 'themes.material-theme-mode', 'dark')['theme']['theme_mode'] == 'dark'
-        assert cli('get', 'system')['mode'] == 'dark'
+        theme_checks()
         controls = cli('list')['controls']
         assert any(control['availability'] == 'available' for control in controls)
         unavailable = next(control for control in controls if control['availability'] != 'available')
@@ -504,7 +542,7 @@ def session_checks():
         assert not (Path(os.environ['XDG_CONFIG_HOME']) / 'remya/shared/accent.toml').exists()
         assert cli('set', 'themes.6f67371e', '#123abc')['color'] == '#123ABC'
         assert dbus('Get', 'accent')['color'] == '#123ABC'
-        assert cli('get', 'theme')['theme'].keys() == {'style_variant', 'theme_mode'}
+        assert cli('get', 'theme')['theme'].keys() == {'style_variant', 'theme_mode', 'contrast'}
         assert 'InvalidArgument' in cli('set', 'themes.6f67371e', 'blue', ok=False)
         assert 'InvalidArgument' in cli('set', 'themes.8983f367', 'other', ok=False)
         cli('set', 'themes.6f67371e', '#8054C9')
@@ -726,6 +764,9 @@ def main():
     if '--app-preferences-session' in sys.argv:
         app_preferences_session()
         return
+    if '--theme-session' in sys.argv:
+        theme_session()
+        return
     if '--session' in sys.argv:
         session_checks()
         return
@@ -737,6 +778,10 @@ def main():
                            HYPRLAND_CONFIG=str(home / 'hyprland.lua'), NO_AT_BRIDGE='1', GIO_USE_VFS='local', GTK_USE_PORTAL='0')
         (home / 'hyprland.lua').write_text('-- Isolated appearance smoke-test entrypoint\n')
         environment['XDG_CONFIG_DIRS'] = str(home / 'system-config')
+        if '--theme' in sys.argv:
+            subprocess.run(['dbus-run-session', '--', sys.executable, str(Path(__file__).resolve()), '--theme-session'],
+                           env=environment, check=True, timeout=120)
+            return
         if '--app-preferences' in sys.argv:
             subprocess.run(['dbus-run-session', '--', sys.executable, str(Path(__file__).resolve()), '--app-preferences-session'],
                            env=environment, check=True, timeout=120)

@@ -4,7 +4,10 @@
 library;
 
 export 'src/settings/about.dart';
+export 'src/settings/account_controller.dart';
+export 'src/settings/avatar_editor.dart';
 export 'src/settings/licenses_view.dart';
+export 'src/settings/material_theme.dart';
 export 'src/settings/navigation.dart';
 export 'src/settings/row_layout.dart';
 export 'src/settings/scaffold.dart';
