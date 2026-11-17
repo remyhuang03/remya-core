@@ -13,6 +13,8 @@ pub enum Kind {
     Float(f64, f64),
     /// Writable strings. Reads may also report Hyprland's empty default.
     Text(&'static [&'static str]),
+    /// Touchscreen target: compositor default, focused display, or a connector.
+    TouchOutput,
     /// A one-line font family name such as `"Sans"` or `"Noto Sans"`.
     FontFamily,
     /// `"default"`, `"none"`, or an absolute `.wav`/`.ogg`/`.oga` file path.
@@ -68,6 +70,10 @@ impl Opt {
                 Some(v) => Ok(json!(v)),
                 None => invalid(format!("Use one of {}", allowed.join(", "))),
             },
+            Kind::TouchOutput => match value.as_str().filter(|v| touch_output(v)) {
+                Some(v) => Ok(json!(v)),
+                None => invalid("Choose a touchscreen display connector".into()),
+            },
             Kind::FontFamily => match value
                 .as_str()
                 .map(str::trim)
@@ -121,7 +127,11 @@ impl Opt {
             Kind::Bool => json!(current.as_bool().or(current.as_i64().map(|v| v != 0))),
             Kind::Int(..) => json!(current.as_i64().or(current.as_f64().map(|v| v as i64))),
             Kind::Float(..) => json!(current.as_f64().map(round)),
-            Kind::Text(_) | Kind::FontFamily | Kind::BellSound | Kind::XkbOptions => {
+            Kind::Text(_)
+            | Kind::TouchOutput
+            | Kind::FontFamily
+            | Kind::BellSound
+            | Kind::XkbOptions => {
                 json!(text(current))
             }
             // `read_options` reports layouts as `[kb_layout, kb_variant]`.
@@ -165,6 +175,14 @@ impl Opt {
             })),
         }
     }
+}
+
+fn touch_output(value: &str) -> bool {
+    value == "[[Auto]]"
+        || (value.len() <= 64
+            && value
+                .bytes()
+                .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c)))
 }
 
 /// A `descriptions` string; Hyprland reports an empty one as `[[EMPTY]]`.
@@ -250,12 +268,13 @@ fn round(v: f64) -> f64 {
 }
 
 macro_rules! opts {
-    ($table:ident: $(($id:literal, $name:expr, $kind:expr)),* $(,)?) => {
+    ($table:ident: $(($id:expr, $name:expr, $kind:expr)),* $(,)?) => {
         pub const $table: &[Opt] = &[$(Opt { id: $id, name: $name, kind: $kind }),*];
     };
 }
 opts![INPUT_OPTIONS:
     ("mouse.primary-button", "input:left_handed", Kind::Bool),
+    (crate::TOUCH_OUTPUT, "input:touchdevice:output", Kind::TouchOutput),
     (
         "mouse.pointer-speed",
         "input:sensitivity",
@@ -894,6 +913,9 @@ fn value(text: &str, kind: Kind) -> Option<Value> {
         Kind::Float(..) => text.parse::<f64>().ok().map(Value::from),
         Kind::Text(_) | Kind::XkbOptions => string(text)
             .filter(|(_, rest)| rest.is_empty())
+            .map(|(s, _)| s.into()),
+        Kind::TouchOutput => string(text)
+            .filter(|(s, rest)| rest.is_empty() && touch_output(s))
             .map(|(s, _)| s.into()),
         Kind::FontFamily => string(text)
             .filter(|(s, rest)| {

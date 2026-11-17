@@ -178,6 +178,7 @@ pub struct Volume {
     pub device: String,
     pub label: String,
     pub fs_type: String,
+    pub encryption: Option<&'static str>,
     pub size: u64,
     pub offset: u64,
     pub number: u64,
@@ -264,21 +265,30 @@ pub fn parse(objects: &Objects, home: &Path) -> Vec<Drive> {
             }
             let fs_type = text(objects, block, "Block", "IdType");
             let filesystem = ifs.contains_key(&format!("{PREFIX}Filesystem"));
-            // Show the unlocked filesystem once, using its backing partition geometry.
-            if fs_type == "crypto_LUKS"
+            let encrypted = ifs.contains_key(&format!("{PREFIX}Encrypted"));
+            let luks = fs_type == "crypto_LUKS";
+            let mapped = (encrypted || luks)
                 && objects
                     .keys()
-                    .any(|b| text(objects, b, "Block", "CryptoBackingDevice") == *block)
-            {
+                    .any(|b| text(objects, b, "Block", "CryptoBackingDevice") == *block);
+            // Show the unlocked filesystem once, using its backing partition geometry.
+            if luks && mapped {
                 continue;
             }
             if !filesystem
                 && !ifs.contains_key(&format!("{PREFIX}Partition"))
                 && fs_type != "swap"
-                && fs_type != "crypto_LUKS"
+                && !luks
             {
                 continue;
             }
+            let encryption = if encrypted {
+                Some(if mapped { "unlocked" } else { "locked" })
+            } else if base != block {
+                Some("unlocked")
+            } else {
+                None
+            };
             let mount_points = prop(objects, block, "Filesystem", "MountPoints")
                 .and_then(Value::as_array)
                 .map(|a| a.iter().map(bytes).collect::<Vec<_>>())
@@ -305,6 +315,7 @@ pub fn parse(objects: &Objects, home: &Path) -> Vec<Drive> {
                 device,
                 label: text(objects, block, "Block", "IdLabel"),
                 fs_type,
+                encryption,
                 size: number(objects, base, "Block", "Size"),
                 offset: number(objects, base, "Partition", "Offset"),
                 number: number(objects, base, "Partition", "Number"),

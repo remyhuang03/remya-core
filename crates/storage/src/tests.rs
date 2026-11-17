@@ -333,7 +333,7 @@ impl Disks for FakeDisks {
 fn objects() -> disks::Objects {
     serde_json::from_value(json!({
     "/drive":{"org.freedesktop.UDisks2.Drive":{"Model":"Test SSD","Size":1000,"ConnectionBus":"usb","Ejectable":true,"CanPowerOff":true}},
-    "/part":{"org.freedesktop.UDisks2.Block":{"Drive":"/drive","IdType":"crypto_LUKS","Size":500},"org.freedesktop.UDisks2.Partition":{"Offset":100,"Number":1}},
+    "/part":{"org.freedesktop.UDisks2.Block":{"Drive":"/drive","IdType":"crypto_LUKS","Size":500},"org.freedesktop.UDisks2.Encrypted":{"CleartextDevice":"/clear"},"org.freedesktop.UDisks2.Partition":{"Offset":100,"Number":1}},
     "/clear":{"org.freedesktop.UDisks2.Block":{"CryptoBackingDevice":"/part","IdType":"ext4","IdLabel":"Data","Device":[47,100,101,118,47,100,109,45,48,0]},"org.freedesktop.UDisks2.Filesystem":{"MountPoints":[[47,0]]}},
     "/ignored":{"org.freedesktop.UDisks2.Block":{"Drive":"/drive","HintIgnore":true,"Size":1},"org.freedesktop.UDisks2.Filesystem":{}},
     "/swap":{"org.freedesktop.UDisks2.Block":{"Drive":"/drive","IdType":"swap","Size":10}},
@@ -352,6 +352,7 @@ fn udisks_fixture_resolves_luks_and_protects_system_volumes() {
     let clear = drives[0].volumes.iter().find(|v| v.id == "/clear").unwrap();
     assert_eq!(clear.offset, 100);
     assert_eq!(clear.number, 1);
+    assert_eq!(json!(clear)["encryption"], "unlocked");
     assert!(clear.system);
     assert!(!clear.can_unmount);
     assert!(
@@ -384,6 +385,17 @@ fn udisks_fixture_resolves_luks_and_protects_system_volumes() {
     );
     assert!(!disks::valid_label(&"a".repeat(256)));
     assert!(!disks::valid_label("bad\n"));
+}
+#[test]
+fn udisks_reports_locked_container_without_claiming_other_volumes_are_unencrypted() {
+    let mut objects = objects();
+    objects.remove("/clear");
+    let drives = disks::parse(&objects, Path::new("/home"));
+    let volumes = &drives[0].volumes;
+    let part = volumes.iter().find(|v| v.id == "/part").unwrap();
+    let swap = volumes.iter().find(|v| v.id == "/swap").unwrap();
+    assert_eq!(json!(part)["encryption"], "locked");
+    assert_eq!(json!(swap)["encryption"], Value::Null);
 }
 #[derive(Default)]
 struct FakeProcess {

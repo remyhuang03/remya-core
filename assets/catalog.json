@@ -338,7 +338,7 @@
     {
       "id": "privacy",
       "title": "Privacy & security",
-      "description": "Compositor permissions, device encryption and search indexing",
+      "description": "Compositor permissions and search indexing",
       "icon": "shield"
     },
     {
@@ -950,7 +950,7 @@
       "id": "storage",
       "category": "system",
       "title": "Storage",
-      "description": "Space usage, disks and volumes",
+      "description": "Space usage, disks, USB drives and volume encryption",
       "preview": "none",
       "availability": "available",
       "reason": "Uses the Rust storage service with live readback and validated operations; missing host tools are reported at runtime.",
@@ -3796,11 +3796,11 @@
     {
       "id": "touch",
       "category": "devices",
-      "title": "Touch",
-      "description": "Touch gestures and wake-up",
+      "title": "Touchscreen",
+      "description": "Choose which display receives touchscreen input",
       "preview": "none",
-      "availability": "planned",
-      "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
+      "availability": "available",
+      "reason": "Reads connected touchscreens and displays and applies a shared touchscreen display preference.",
       "sources": [
         "uris",
         "hypr-options",
@@ -3811,176 +3811,24 @@
       ],
       "sections": [
         {
-          "title": "Settings",
+          "title": "Display mapping",
+          "description": "This preference applies to all connected touchscreens.",
           "controls": [
-            {
-              "id": "touch.5cfa5330",
-              "title": "Three- and four-finger touch gestures",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
-            },
-            {
-              "id": "touch.de9f8969",
-              "title": "Touch screen to wake up",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
-            }
-          ]
-        },
-        {
-          "title": "Advanced",
-          "collapsed": true,
-          "controls": [
-            {
-              "id": "touch.mapping-enabled",
-              "title": "Touch mapping: enabled (enabled)",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; Hyprland settings are only for interface preview, component installation, versions and available interfaces need to be verified in the future, and the current system will not be read or modified.",
-              "value": true,
-              "referencePath": [
-                "hypr-options",
-                "input.touchdevice",
-                "enabled"
-              ]
-            },
             {
               "id": "touch.mapping-output",
-              "title": "Touch mapping: Target display (output)",
-              "type": "text",
-              "availability": "planned",
-              "reason": "Not yet implemented; Hyprland settings are only for interface preview, component installation, versions and available interfaces need to be verified in the future, and the current system will not be read or modified.",
-              "value": "",
+              "title": "Touchscreen display",
+              "type": "choice",
+              "availability": "available",
+              "reason": "Uses the compositor touchscreen mapping. Available choices come from connected displays.",
+              "value": "[[Auto]]",
               "referencePath": [
                 "hypr-options",
                 "input.touchdevice",
                 "output"
-              ]
-            },
-            {
-              "id": "touch.mapping-transform",
-              "title": "Touch mapping: Rotation and flipping (transform)",
-              "type": "slider",
-              "availability": "planned",
-              "reason": "Not yet implemented; Hyprland settings are only for interface preview, component installation, versions and available interfaces need to be verified in the future, and the current system will not be read or modified.",
-              "value": 0.0,
-              "min": 0.0,
-              "max": 6.0,
-              "unit": "",
-              "referencePath": [
-                "hypr-options",
-                "input.touchdevice",
-                "transform"
-              ]
-            }
-          ],
-          "description": "Planned compositor options from Hyprland configuration options, HyprViz page organization."
-        }
-      ],
-      "children": []
-    },
-    {
-      "id": "autoplay",
-      "category": "devices",
-      "title": "Autoplay",
-      "description": "Removable media and memory card default behavior",
-      "preview": "none",
-      "availability": "planned",
-      "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [
-        "ms-settings:autoplay"
-      ],
-      "sections": [
-        {
-          "title": "Settings",
-          "controls": [
-            {
-              "id": "autoplay.aef48ac6",
-              "title": "Use autoplay for all media and devices",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
-            },
-            {
-              "id": "autoplay.cf7a8268",
-              "title": "Removable drives",
-              "type": "choice",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "options": [
-                "Every inquiry",
-                "Open folder",
-                "No action performed"
               ],
-              "value": "Every inquiry"
-            },
-            {
-              "id": "autoplay.16fc14e6",
-              "title": "Memory card",
-              "type": "choice",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
               "options": [
-                "Every inquiry",
-                "Import photos",
-                "No action performed"
-              ],
-              "value": "Every inquiry"
-            }
-          ]
-        }
-      ],
-      "children": []
-    },
-    {
-      "id": "usb",
-      "category": "devices",
-      "title": "USB",
-      "description": "Connection issues, charging and energy saving",
-      "preview": "none",
-      "availability": "planned",
-      "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [
-        "ms-settings:usb"
-      ],
-      "sections": [
-        {
-          "title": "Settings",
-          "controls": [
-            {
-              "id": "usb.ef54bf0f",
-              "title": "Notify me of connection problems",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
-            },
-            {
-              "id": "usb.4b9d110f",
-              "title": "Notify me when USB charging is slow",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
-            },
-            {
-              "id": "usb.cbd35db8",
-              "title": "Stop USB devices when screen is off to save power",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
+                "[[Auto]]"
+              ]
             }
           ]
         }
@@ -9909,53 +9757,6 @@
       ]
     },
     {
-      "id": "encryption",
-      "category": "privacy",
-      "title": "Device encryption",
-      "description": "Device encryption and recovery keys",
-      "preview": "none",
-      "availability": "planned",
-      "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-      "sources": [
-        "uris"
-      ],
-      "windowsUris": [
-        "ms-settings:deviceencryption"
-      ],
-      "sections": [
-        {
-          "title": "Settings",
-          "controls": [
-            {
-              "id": "encryption.47011073",
-              "title": "Device encryption",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": false
-            },
-            {
-              "id": "encryption.850ab6af",
-              "title": "Back up the recovery key",
-              "type": "action",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": "Configuration"
-            },
-            {
-              "id": "encryption.45dd31ac",
-              "title": "Encryption status",
-              "type": "info",
-              "availability": "planned",
-              "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
-              "value": "Not read"
-            }
-          ]
-        }
-      ],
-      "children": []
-    },
-    {
       "id": "search-index",
       "category": "privacy",
       "title": "Search and indexing",
@@ -10246,54 +10047,6 @@
               "availability": "planned",
               "reason": "Not yet implemented; only the interface is displayed here, and system settings will not be read or changed.",
               "value": "Configuration"
-            }
-          ]
-        }
-      ],
-      "children": []
-    },
-    {
-      "id": "hypr-input-capture",
-      "category": "privacy",
-      "title": "Hyprland · Input capture boundaries",
-      "description": "Advanced compositor settings: input-capture · Hyprland",
-      "preview": "none",
-      "availability": "planned",
-      "reason": "Not yet implemented; Hyprland settings are only for interface preview, component installation, versions and available interfaces need to be verified in the future, and the current system will not be read or modified.",
-      "sources": [
-        "hypr-options",
-        "hyprviz-project"
-      ],
-      "windowsUris": [],
-      "sections": [
-        {
-          "title": "Input capture boundaries",
-          "controls": [
-            {
-              "id": "hypr-input-capture.capture-modifiers",
-              "title": "capture modifiers · capture_modifiers",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; Hyprland settings are only for interface preview, component installation, versions and available interfaces need to be verified in the future, and the current system will not be read or modified.",
-              "value": false,
-              "referencePath": [
-                "hypr-options",
-                "input-capture",
-                "capture_modifiers"
-              ]
-            },
-            {
-              "id": "hypr-input-capture.enforce-barriers",
-              "title": "enforce barriers · enforce_barriers",
-              "type": "toggle",
-              "availability": "planned",
-              "reason": "Not yet implemented; Hyprland settings are only for interface preview, component installation, versions and available interfaces need to be verified in the future, and the current system will not be read or modified.",
-              "value": true,
-              "referencePath": [
-                "hypr-options",
-                "input-capture",
-                "enforce_barriers"
-              ]
             }
           ]
         }

@@ -12,6 +12,8 @@ Microsoft publishes a [Settings navigation guide](https://support.microsoft.com/
 
 The retained coverage includes **96 URI entries** from the reference tables. Query parameters selecting individual apps, cameras, or audio endpoints belong to the same page; aliases are recorded on their target page. Remaining Windows-only entries are clearly unavailable reference previews. A URI that redirects to another view is not evidence of an independent current Windows 11 page.
 
+These counts and URI mappings describe the original research. The live catalog later dropped AutoPlay because the session's file manager or removable-media helper owns that policy. It also dropped the standalone USB and Device encryption pages: Storage already lists USB drives and reports encryption status for recognized volumes. Touchscreen setup stays under Bluetooth & devices.
+
 The retained backup coverage contains **31 hierarchy entries**: 20 leaf entries that an ordinary control represents, 8 entries that identify their groups and 3 recorded removals. The collapsible "Windows reference settings" sections that listed the remaining Windows leaf entries under their original English names were removed; Windows-only backup items are not previewed. Backup checkmarks describe Windows backup coverage, not implementation status in this application.
 
 There are **188 detail pages**, **1,251 reference controls**, **10 settings categories**, and a separate Home and About view. All controls are authored UI previews. Control types, ranges, sample values, grouping, and option lists are this project's initial model, not Microsoft's internal types, actual hardware capabilities, live defaults, or a guarantee of an exact match to every Windows build. In particular, source-only reference fields whose choices are not documented use an explicit "未配置" option. Future implementation must verify real platform contracts and replace illustrative ranges and choices before enabling them.
@@ -61,7 +63,7 @@ Availability always has a readable label and an icon:
 | `available` | 已实现 | A real integration has been implemented and verified |
 | `planned` | 未实现 | Visible preview; system integration is absent |
 
-No system setting is currently `available`. The renderer deliberately keeps operation controls disabled. Adding an integration requires real read/write bindings, error handling, validation and tests, then updating the control state and availability together. Changing a status string alone must never enable a simulated setting. About labels implemented navigation/license UI separately from system functionality.
+The original reference controls were all previews. Current availability is defined by the live catalog and the backend. Adding an integration requires real bindings, error handling, validation and tests. Changing a status string alone must never enable a simulated setting.
 
 Retained tests resolve recorded URI and backup references, reject malformed data and broken routes, check source and progress-document parity, and cover shared row layout. Local presentation checks were removed after verification.
 

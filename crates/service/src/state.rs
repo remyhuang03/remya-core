@@ -672,7 +672,13 @@ impl State {
                     }
                     _ if key.starts_with(input::LOOKUP) => self.input.lookup(&key[input::LOOKUP.len()..]),
                     _ if input::is_setting(key) => {
-                        let _ = self.input.refresh();
+                        let read = self.input.refresh();
+                        if key == input::TOUCH_OUTPUT
+                            && let Some(reason) = read.as_ref().err().map(String::as_str)
+                                .or_else(|| self.input.touchscreen_unavailable())
+                        {
+                            return Ok(json!({"id":key,"availability":"unavailable","reason":reason,"value":null,"error":self.input.state()["error"]}));
+                        }
                         Ok(json!({"id":key,"availability":"available","reason":"Uses Hyprland input settings and key bindings.","value":self.input.setting_value(key),"error":self.input.state()["error"]}))
                     }
                     "startup" => {

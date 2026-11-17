@@ -1,4 +1,4 @@
-//! Settings-owned Hyprland options: mouse, touchpad and keyboard shortcuts (`input`)
+//! Settings-owned Hyprland options: mouse, touchpad, touchscreen and keyboard shortcuts (`input`)
 //! and window appearance, layout, cursor behavior, workspaces and their rules, window
 //! rules, session environment variables, blur, fallback background, display wake,
 //! compositor font and compositor bell (`desktop`).
@@ -33,6 +33,7 @@ pub const DISABLE: &str = "keyboard-shortcuts.disable";
 pub const RECORD: &str = "keyboard-shortcuts.record";
 pub const LIST: &str = "keyboard-shortcuts.list";
 pub const LOOKUP: &str = "keyboard-shortcuts.lookup:";
+pub const TOUCH_OUTPUT: &str = "touch.mapping-output";
 const RECORD_SUBMAP: &str = "remya-settings-record";
 pub const RULE_SET: &str = "workspaces.rule-set";
 pub const RULE_REMOVE: &str = "workspaces.rule-remove";
@@ -112,12 +113,25 @@ struct Observed {
     autoreload: bool,
     binds: Vec<Value>,
     devices: Value,
+    touch_displays: Vec<Value>,
+    touch_error: Option<String>,
     layout: Layout,
     workspace_rules: Vec<Value>,
     monitors: Vec<Value>,
     workspaces: Vec<Value>,
     clients: Vec<Value>,
     file: Option<File>,
+}
+
+impl Observed {
+    fn touchscreens(&self) -> Vec<&str> {
+        self.devices["touch"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|device| device["name"].as_str().filter(|name| !name.is_empty()))
+            .collect()
+    }
 }
 
 pub struct Input<H> {
@@ -395,6 +409,25 @@ impl<H: Hypr> Input<H> {
                 .unwrap_or_default();
             self.observed.devices = self.hypr.json("devices")?;
             self.observed.layout = layout(&self.observed.devices);
+            self.observed.touch_displays.clear();
+            self.observed.touch_error = None;
+            if !self.observed.touchscreens().is_empty() {
+                match self.hypr.json("monitors") {
+                    Ok(Value::Array(displays)) => {
+                        self.observed.touch_displays = displays
+                            .into_iter()
+                            .filter(|m| {
+                                m["disabled"] != true
+                                    && m["name"].as_str().is_some_and(|name| !name.is_empty())
+                            })
+                            .collect();
+                    }
+                    Ok(_) => {
+                        self.observed.touch_error = Some("No display list was reported".into())
+                    }
+                    Err(error) => self.observed.touch_error = Some(error),
+                }
+            }
         }
         if self.group.rules {
             let list = |what| {
@@ -642,6 +675,9 @@ impl<H: Hypr> Input<H> {
             "layout": self.observed.layout.layout,
             "mice": names(false),
             "touchpads": names(true),
+            "touchscreens": self.observed.touchscreens(),
+            "touch_displays": self.observed.touch_displays.iter().map(monitor).collect::<Vec<_>>(),
+            "touch_error": self.observed.touch_error,
             "recording": self.recording,
             "rules": saved.map(|s| &s.rules),
             "system_rules": self.observed.file.as_ref().map(|f| &f.rules),
@@ -681,6 +717,31 @@ impl<H: Hypr> Input<H> {
         match self.group.option(id) {
             Some(_) => self.state()["options"][id].clone(),
             None => self.state(),
+        }
+    }
+
+    pub fn touchscreen_unavailable(&self) -> Option<&str> {
+        if self.observed.touchscreens().is_empty() {
+            Some("No touchscreen detected")
+        } else {
+            self.observed.touch_error.as_deref()
+        }
+    }
+
+    fn validate_touch_target(&self, value: &Value) -> Result<(), String> {
+        if let Some(reason) = self.touchscreen_unavailable() {
+            return Err(format!("Unavailable:{reason}"));
+        }
+        if matches!(value.as_str(), Some("[[Auto]]" | ""))
+            || self
+                .observed
+                .touch_displays
+                .iter()
+                .any(|m| &m["name"] == value)
+        {
+            Ok(())
+        } else {
+            Err(invalid("Choose a connected display"))
         }
     }
 
@@ -1140,6 +1201,9 @@ impl<H: Hypr> Input<H> {
                     .option(id)
                     .ok_or_else(|| invalid("Unknown setting"))?;
                 let validated = opt.validate(&value)?;
+                if id == TOUCH_OUTPUT {
+                    self.validate_touch_target(&validated)?;
+                }
                 if id == "sound.compositor-bell"
                     && let Some(path) = validated.as_str()
                     && !matches!(path, "default" | "none")
@@ -1235,6 +1299,14 @@ impl<H: Hypr> Input<H> {
                         return Err(reason.clone());
                     }
                     let saved = self.saved.clone().ok_or("Nothing is saved yet")?;
+                    if let Some((output, live)) = saved
+                        .options
+                        .get(TOUCH_OUTPUT)
+                        .zip(self.observed.options.get(TOUCH_OUTPUT))
+                        && !same(output, live)
+                    {
+                        self.validate_touch_target(output)?;
+                    }
                     self.write(saved, file)
                 }
                 _ => Err(invalid("Unknown resolution")),

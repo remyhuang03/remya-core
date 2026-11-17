@@ -82,6 +82,20 @@ def main():
         assert not state["conflict"] and not owned.exists(), "first use changed the system"
         assert (hypr / "hyprland.lua").read_text() == MAIN
 
+        # A nested session has no physical touchscreen. The preference can be
+        # read from Hyprland, but can't be written through Core without one.
+        touch_output = "touch.mapping-output"
+        assert state["touchscreens"] == [] and state["touch_displays"] == []
+        assert state["system"][touch_output] == "[[Auto]]"
+        assert call("Get", touch_output)["availability"] == "unavailable"
+        assert "No touchscreen detected" in call("Set", touch_output, f"'{json.dumps('DP-1')}'", ok=False)
+        assert not owned.exists()
+        assert hyprctl("eval", 'hl.config({ input = { touchdevice = { output = "DP-1" } } })').strip() == "ok"
+        assert call("Get", "input")["system"][touch_output] == "DP-1"
+        assert hyprctl("eval", 'hl.config({ input = { touchdevice = { output = "" } } })').strip() == "ok"
+        assert call("Get", "input")["system"][touch_output] == ""
+        assert hyprctl("eval", 'hl.config({ input = { touchdevice = { output = "[[Auto]]" } } })').strip() == "ok"
+
         # Options apply live, persist through the managed require and survive a reload.
         call("Set", "mouse.pointer-speed", "0.4")
         call("Set", "touchpad.tap-to-click", "false")

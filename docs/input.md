@@ -1,6 +1,6 @@
 # Input devices and shortcuts
 
-The Mouse, Touchpad and Keyboard shortcuts pages (Bluetooth & devices) configure
+The Mouse, Touchpad, Touchscreen and Keyboard shortcuts pages (Bluetooth & devices) configure
 Hyprland 0.57 or later with a Lua configuration. The backend is the
 `remya_input` crate in `crates/input/`. The keyboard shortcuts
 work entirely through Hyprland key bindings, but the interface does not present
@@ -94,6 +94,29 @@ for a difference in shortcuts. While a conflict exists, writes are refused.
 Settings-owned file, which loads last and would otherwise bring the old value back
 on the next reload. `Resolve input
 settings` writes the saved values and verifies them.
+
+## Touchscreen display
+
+Choose which connected display receives touches when the default targets the
+wrong screen. This sets Hyprland's session-wide `input:touchdevice:output`
+preference using the same validation, user-owned Lua file and readback as the
+other input options. No elevation is needed. The list comes from `hyprctl -j
+monitors`; hardware presence comes from the `touch` list in `hyprctl -j
+devices`. When there is no touchscreen or the display list cannot be read, the
+control cannot write. A display that disconnects is not offered for a new
+selection; the saved connector remains available to the compositor if it returns.
+
+This is one setting shared by all touchscreens. Existing per-device rules can
+override it; Hyprland does not expose the effective mapping for each touchscreen
+through its device list. The default is `[[Auto]]`: Hyprland 0.57.2 uses the
+focused display when the configured output is unavailable. The existing empty
+configuration value means to follow the focused display explicitly. No
+touchscreen disable, calibration, wake or gesture controls are offered.
+
+`cargo test -p remya_input` checks detection, active connector validation and
+persistence with a fake compositor. `tests/input_smoke.py` checks the option
+against nested Hyprland, including rejection through D-Bus without a touchscreen.
+Physical touch routing has not been verified.
 
 ## Shortcuts
 

@@ -11,6 +11,8 @@ struct World {
     file: PathBuf,
     reloads: u32,
     reject: bool,
+    touchscreen: bool,
+    display_error: bool,
 }
 
 #[derive(Clone, Default)]
@@ -68,6 +70,7 @@ impl Hypr for Fake {
                     .map(|o| json!({"name": o.name, "current": w.options.get(o.name).cloned().unwrap_or(match o.kind {
                         config::Kind::Bool => json!(false),
                         config::Kind::Text(_) | config::Kind::XkbOptions => json!("[[EMPTY]]"),
+                        config::Kind::TouchOutput => json!("[[Auto]]"),
                         config::Kind::Layouts => json!("us"),
                         _ => json!(0),
                     })}))
@@ -84,8 +87,15 @@ impl Hypr for Fake {
             )
             .to_string(),
             ["-j", "devices"] => json!({"mice": [{"name": "usb-mouse"}, {"name": "syna-touchpad"}],
-                "keyboards": [{"name": "kb", "main": true, "layout": "us", "rules": "", "model": "", "variant": "", "options": ""}]})
+                "keyboards": [{"name": "kb", "main": true, "layout": "us", "rules": "", "model": "", "variant": "", "options": ""}],
+                "touch": if w.touchscreen { json!([{"name": "usb-touchscreen"}]) } else { json!([]) }})
             .to_string(),
+            ["-j", "monitors"] if w.display_error => return Err("Display query failed".into()),
+            ["-j", "monitors"] => json!([
+                {"name": "DP-1", "description": "External display", "width": 3840, "height": 2160, "scale": 2, "transform": 1, "x": 0, "y": 0},
+                {"name": "DP-2", "disabled": true},
+                {"name": ""}
+            ]).to_string(),
             ["-j", "submap"] => json!(if w.submap.is_empty() { "default" } else { &w.submap }).to_string(),
             ["reload"] => {
                 w.reload();
@@ -147,6 +157,42 @@ fn setup() -> Setup {
         world,
         input,
     }
+}
+
+#[test]
+fn touchscreen_mapping_requires_a_touchscreen_and_an_active_display() {
+    let mut s = setup();
+    let set = |s: &mut Setup, output: &str| s.input.set(TOUCH_OUTPUT, &json!(output).to_string());
+    assert!(set(&mut s, "DP-1").unwrap_err().starts_with("Unavailable:"));
+    s.world.0.lock().unwrap().touchscreen = true;
+    for invalid in ["DP-2", "DP-3", "DP-1\" })"] {
+        assert!(
+            set(&mut s, invalid)
+                .unwrap_err()
+                .starts_with("InvalidArgument:")
+        );
+    }
+    assert!(!s.input.file_path().exists());
+    assert!(!s.input.saved_path.exists());
+
+    let state = set(&mut s, "DP-1").unwrap();
+    assert_eq!(state["touchscreens"], json!(["usb-touchscreen"]));
+    assert_eq!(state["touch_displays"].as_array().unwrap().len(), 1);
+    assert_eq!(state["touch_displays"][0]["width"], json!(1080.0));
+    s.world.0.lock().unwrap().reload();
+    s.input.refresh().unwrap();
+    assert_eq!(s.input.state()["system"][TOUCH_OUTPUT], "DP-1");
+    assert_eq!(s.input.state()["conflict"], false);
+
+    let state = set(&mut s, "[[Auto]]").unwrap();
+    assert_eq!(state["system"][TOUCH_OUTPUT], "[[Auto]]");
+
+    s.world.0.lock().unwrap().display_error = true;
+    let state = s.input.set("mouse.pointer-speed", "0.4").unwrap();
+    assert_eq!(state["touch_error"], "Display query failed");
+    assert_eq!(state["touchscreens"], json!(["usb-touchscreen"]));
+    assert_eq!(state["system"]["mouse.pointer-speed"], json!(0.4));
+    assert!(set(&mut s, "DP-1").unwrap_err().starts_with("Unavailable:"));
 }
 
 #[test]

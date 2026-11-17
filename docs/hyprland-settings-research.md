@@ -2,7 +2,9 @@
 
 Research date: 2026-10-26. Baseline: commit `44679b271497c40a0d37dd40299f89ae59c7aa6f`.
 
-The retained extension has no category of its own: its **303 controls** live on ordinary pages, and three pages (Window appearance, Animations and Input capture) were added for it. Coverage files describe the currently included controls and their owning pages.
+The original extension added 303 controls on ordinary pages, including the then-new Window appearance, Animations and Input capture pages. The coverage file preserves that research and its source mappings; the live catalog in `assets/catalog.json` defines what ships.
+
+Input capture was later removed. Modifier forwarding and barrier validation are protocol behavior, not session permissions or controls most users need. Touchscreen display mapping now has a focused page under Bluetooth & devices; see [Input devices and shortcuts](input.md).
 
 Controls marked `available` use Core and the managed Lua files described in [Input devices and shortcuts](input.md) and [Public interfaces](public-api.md). Every other addition is `planned`: it stays disabled, and nothing is read or modified for it. Optional components are named in each page's availability reason; their presence and compatibility are not detected.
 
@@ -32,7 +34,7 @@ Hyprland controls are grouped by system responsibility on ordinary pages; there 
 | Sound | 0 | Native PipeWire default devices, stream inventory and routing; device profile/port previews |
 | Bluetooth & devices | 0 | Global XKB/input overrides, pointer engine, touchpad/touch/tablet/pen parameters, virtual keyboards and gesture definitions |
 | Appearance | 2 | Window appearance (window and group border colours, corners, opacity, dimming, shadows and glow) and Animations (global switches, motion blur, wobbly windows, animation trees and curves); window blur lives on Background |
-| Privacy & security | 1 | Capture boundaries, Hyprlock authentication and widget configuration |
+| Privacy & security | 1 (since removed) | Capture boundaries, Hyprlock authentication and widget configuration |
 
 No unrelated network, account, language, accessibility, or update category was changed merely to increase coverage. Concepts already represented there remain available as original previews.
 

@@ -29,7 +29,9 @@ optional Core camera preview library writes no configuration, data or cache.
 
 Hyprland paths remain under `$XDG_CONFIG_HOME/hypr`, including
 `remya-settings/*.lua`, `monitors.lua`, `hyprsunset.conf`, `hypridle.conf`, and
-`hyprpaper.conf`. Debug roots do not redirect host integration files. Custom AI
+`hyprpaper.conf`. The touchscreen display preference shares `input.toml` and
+`remya-settings/input.lua` with mouse, touchpad and shortcut preferences.
+Debug roots do not redirect host integration files. Custom AI
 keys still use Secret Service with the unchanged `top.remya.settings` application attribute value;
 CodexBar retains its own configuration and credential storage.
 

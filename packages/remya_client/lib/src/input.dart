@@ -13,12 +13,14 @@ const removeWindowRuleId = 'window-rules.remove';
 const setEnvironmentVariableId = 'environment.set';
 const removeEnvironmentVariableId = 'environment.remove';
 
-/// Settings-owned Hyprland options: `input` (mouse, touchpad and keyboard
-/// shortcuts) and `desktop` (window layout, window appearance, animations,
+/// Settings-owned Hyprland options: `input` (mouse, touchpad, touchscreen and
+/// keyboard shortcuts) and `desktop` (window layout, window appearance, animations,
 /// cursor behavior, workspaces and workspace rules, window rules, session
 /// environment variables, blur, fallback background, display wake, the
 /// compositor font and the compositor bell).
 extension InputClient on SettingsClient {
+  /// The `input` state includes detected `touchscreens`, `touch_displays`,
+  /// `touch_error`, and the shared `touch.mapping-output` preference in `options`.
   Future<Map<String, dynamic>> readHyprOptions(String feature) =>
       call('Get', [feature]);
   Future<Map<String, dynamic>> resolveHyprOptions(

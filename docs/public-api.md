@@ -1110,6 +1110,12 @@ nullable `code`, `description`, `actions`, `locked`, `mouse` and `custom`),
 `custom`, `disabled`, `key_labels` (XKB keycode to label in the active layout),
 `layout`, `mice`, `touchpads`, `recording`, `write_blocked` and `error`.
 `Get <id>` for any ID below returns `{id, availability, reason, value, error}`.
+`Get input` also reports `touchscreens` (detected device names), `touch_displays`
+(active connectors with `name`, `description`, `x`, `y`, `width` and `height` in
+logical layout pixels), and `touch_error` (nullable display query failure).
+`Get touch.mapping-output` reports unavailable if a touchscreen or the display
+list cannot be detected. The value is the global preference; it does not claim
+to be the effective target of a particular touchscreen.
 
 | Set ID | Value |
 | --- | --- |
@@ -1125,6 +1131,7 @@ nullable `code`, `description`, `actions`, `locked`, `mouse` and `custom`),
 | `touchpad.drag-lock`, `touchpad.three-finger-drag` | 0 to 2 |
 | `touchpad.swipe-distance` | 0 to 2000; `touchpad.swipe-min-speed`: 0 to 200; `touchpad.swipe-cancel-ratio`: 0 to 1 |
 | `touchpad.swipe-invert`, `touchpad.swipe-create-new`, `touchpad.swipe-forever`, `touchpad.swipe-direction-lock` | boolean |
+| `touch.mapping-output` | JSON string: `"[[Auto]]"` (compositor default), `""` (follow focused display), or an active display connector such as `"DP-1"`; requires a detected touchscreen |
 | `keyboard-shortcuts.workspace-back-and-forth` | 0 to 2; `keyboard-shortcuts.scroll-delay`: 0 to 2000 ms |
 | `keyboard-shortcuts.workspace-cycles`, `keyboard-shortcuts.pass-mouse` | boolean |
 | `language.keyboard-layouts` | `[{"layout":"us","variant":""}, ...]`: one to four xkeyboard-config layouts, each with an optional variant of that layout; the first is the default. Written as `kb_layout` and `kb_variant` in one `hl.config` call |
@@ -1271,7 +1278,7 @@ remya set text-size.scale 1.25
 
 `Get storage` starts a lazy worker scan and returns `api_version:1`, `initialized`, `writable`, `conflict:false`, `error`, `busy`, `usage`, `drives`, `disks_error` and `reclaimable_bytes`. `usage` contains `scanning`, `progress:{files,bytes}`, `scanned_at` (Unix seconds), `volume:{mount_point,device,total,used,free}`, `categories:[{id,label,bytes,path}]`, `skipped` and `error`. Unavailable observations are null, never sample device values. Category IDs are documents, pictures, videos, music, downloads, desktop, cache, trash, home-other and system; unset XDG folders are omitted.
 
-Each drive reports `id`, `model`, `vendor`, `size`, `removable`, `media_removable`, `ejectable`, `can_power_off`, `connection`, `rotational`, `volumes`. A volume reports `id`, `device`, `label`, `fs_type`, `size`, `offset`, `number`, `mount_points`, optional `usage:{total,used,free}`, `system`, `can_mount`, `can_unmount`, `can_rename`. UDisks2 object paths are identifiers, not device path inputs.
+Each drive reports `id`, `model`, `vendor`, `size`, `removable`, `media_removable`, `ejectable`, `can_power_off`, `connection`, `rotational`, `volumes`. A volume reports `id`, `device`, `label`, `fs_type`, `encryption`, `size`, `offset`, `number`, `mount_points`, optional `usage:{total,used,free}`, `system`, `can_mount`, `can_unmount`, `can_rename`. The read-only `encryption` value is `"locked"` or `"unlocked"` when UDisks2 reports that state, or null when neither is evidenced. UDisks2 object paths are identifiers, not device path inputs.
 
 | Set ID | Strict JSON payload |
 | --- | --- |

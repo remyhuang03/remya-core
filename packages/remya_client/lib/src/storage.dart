@@ -24,6 +24,7 @@ const storageSettingIds = {
 };
 
 extension StorageClient on SettingsClient {
+  /// Volumes include `encryption`: `locked`, `unlocked`, or null if unknown.
   Future<Map<String, dynamic>> readStorage() => call('Get', ['storage']);
   Future<Map<String, dynamic>> readCleanup() => call('Get', ['cleanup']);
   Future<Map<String, dynamic>> scanStorage() => _storageSet('storage.scan', {});
