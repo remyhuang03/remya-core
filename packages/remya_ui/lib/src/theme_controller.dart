@@ -19,40 +19,44 @@ class SettingsThemeController extends ChangeNotifier {
   final File Function()? resolveFile;
   final SettingsClient? _client;
   final bool _ownsClient;
-  StreamSubscription? _changes;
+  StreamSubscription<SettingsChange>? _changes;
   RemyaTheme theme = const .new();
   String? error;
   String? _content;
   Timer? _timer;
-  bool _loading = false;
+  Future<void>? _startFuture;
+  Future<void>? _reloadFuture;
+  bool _dirty = false;
   bool _disposed = false;
-  String? _seed;
 
   /// A missing accent file keeps the default seed.
   Future<String?> _readSeed(File? themeFile) async {
-    try {
-      if (_client case final client?) {
-        return ThemeConfig.seedFromAccent(await client.call('Get', ['accent']));
-      }
-      final file = File('${themeFile!.parent.path}/accent.toml');
-      return await file.exists()
-          ? ThemeConfig.seedFromAccentFile(await file.readAsString())
-          : null;
-    } catch (_) {
-      return null;
+    if (_client case final client?) {
+      return ThemeConfig.seedFromAccent(await client.call('Get', ['accent']));
     }
+    final file = File('${themeFile!.parent.path}/accent.toml');
+    return await file.exists()
+        ? ThemeConfig.seedFromAccentFile(await file.readAsString())
+        : null;
   }
 
-  Future<void> start() async {
+  /// Starts watching theme changes and polling for updates; idempotent.
+  Future<void> start() {
+    if (_disposed) return Future<void>.value();
+    return _startFuture ??= _start();
+  }
+
+  Future<void> _start() async {
     if (_client case final client?) {
       _changes = client.changes.listen(
         (change) {
           if (_disposed) return;
           try {
             if (change.topic == 'theme') {
-              _apply(ThemeConfig.fromMap(change.value).withSeed(_seed));
+              ThemeConfig.fromMap(change.value);
+              unawaited(reload());
             } else if (change.topic == 'accent') {
-              reload();
+              unawaited(reload());
             } else if (change.topic == 'error') {
               error =
                   change.value['message']?.toString() ??
@@ -75,63 +79,79 @@ class SettingsThemeController extends ChangeNotifier {
     await reload();
     if (_disposed) return;
     // Atomic replacements and directories created after startup are both seen.
-    _timer = Timer.periodic(
+    _timer ??= Timer.periodic(
       Duration(milliseconds: _client == null ? 500 : 2000),
-      (_) => reload(),
+      (_) => unawaited(reload()),
     );
   }
 
-  Future<void> reload() async {
-    if (_loading || _disposed) return;
-    _loading = true;
-    final previousError = error;
-    var changed = false;
-    try {
-      ThemeConfig? config;
-      File? file;
-      if (_client case final client?) {
-        config = ThemeConfig.fromMap(await client.call('Get', ['theme']));
-      } else {
-        file = resolveFile!();
-        if (await file.exists()) {
-          config = ThemeConfig.parse(await file.readAsString());
-        }
-      }
-      if (config != null) {
-        _seed = await _readSeed(file);
-        config = config.withSeed(_seed);
-        final content = config.toJson();
-        if (content != _content) {
-          theme = RemyaTheme.fromConfig(config);
-          _content = content;
-          changed = true;
-        }
-      }
-      error = null;
-    } catch (failure) {
-      error = 'Could not read the settings theme: $failure';
-    } finally {
-      _loading = false;
-      if (!_disposed && (changed || previousError != error)) notifyListeners();
-    }
+  /// Reloads theme and accent configuration, coalescing concurrent requests.
+  Future<void> reload() {
+    if (_disposed) return Future<void>.value();
+    _dirty = true;
+    return _reloadFuture ??= _runReloadLoop().whenComplete(() {
+      _reloadFuture = null;
+      if (_dirty && !_disposed) return reload();
+    });
   }
 
-  void _apply(ThemeConfig config) {
-    if (_disposed) return;
-    final content = config.toJson();
-    if (content == _content && error == null) return;
-    theme = RemyaTheme.fromConfig(config);
-    _content = content;
-    error = null;
-    notifyListeners();
+  Future<void> _runReloadLoop() async {
+    while (_dirty && !_disposed) {
+      _dirty = false;
+      final previousError = error;
+      var changed = false;
+      try {
+        ThemeConfig? config;
+        File? file;
+        if (_client case final client?) {
+          config = ThemeConfig.fromMap(await client.call('Get', ['theme']));
+        } else {
+          file = resolveFile!();
+          if (await file.exists()) {
+            config = ThemeConfig.parse(await file.readAsString());
+          }
+        }
+        if (_disposed || _dirty) continue;
+        if (config != null) {
+          config = config.withSeed(await _readSeed(file));
+          if (_disposed || _dirty) continue;
+          final content = config.toJson();
+          if (content != _content) {
+            theme = RemyaTheme.fromConfig(config);
+            _content = content;
+            changed = true;
+          }
+        }
+        error = null;
+      } catch (failure) {
+        if (_disposed || _dirty) continue;
+        error = 'Could not read the settings theme: $failure';
+      }
+      if (changed || previousError != error) notifyListeners();
+    }
   }
 
   @override
   void dispose() {
     _disposed = true;
     _timer?.cancel();
-    _changes?.cancel();
-    if (_ownsClient) _client!.close();
+    _timer = null;
+    final cancel = _changes?.cancel();
+    _changes = null;
+    if (_ownsClient) {
+      unawaited(_closeClientAfter(cancel));
+    } else if (cancel != null) {
+      unawaited(cancel.catchError((Object _) {}));
+    }
     super.dispose();
+  }
+
+  Future<void> _closeClientAfter(Future<void>? cancel) async {
+    try {
+      await cancel;
+    } catch (_) {}
+    try {
+      await _client!.close();
+    } catch (_) {}
   }
 }

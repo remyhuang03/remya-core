@@ -2,8 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'dbus_client.dart';
+import 'watch_stream.dart';
 
-/// Preferences declared by an installed remya/apps/<id>.json registration.
+/// Preferences declared by an installed `remya/apps/<id>.json` registration.
 class AppPreferences {
   AppPreferences(this.id, {SettingsClient? client})
     : _client = client ?? SettingsClient(),
@@ -26,21 +27,12 @@ class AppPreferences {
   ) => _client.call('Replace', ['$id.$key', jsonEncode(value), revision]);
 
   /// Subscribe before reading so a concurrent write cannot be missed.
-  Stream<Map<String, dynamic>> watch(String key) async* {
-    final pending = StreamController<SettingsChange>();
-    final subscription = _client.changes
-        .where((change) => change.topic == '$id.$key')
-        .listen(pending.add, onError: pending.addError);
-    try {
-      yield await get(key);
-      await for (final _ in pending.stream) {
-        yield await get(key);
-      }
-    } finally {
-      await subscription.cancel();
-      unawaited(pending.close());
-    }
-  }
+  Stream<Map<String, dynamic>> watch(String key) =>
+      watchChangesStream<Map<String, dynamic>>(
+        source: _client.changes.where((change) => change.topic == '$id.$key'),
+        initial: () => get(key),
+        onChange: (_) => get(key),
+      );
 
   /// Close the connection only when this helper created it.
   Future<void> close() async {

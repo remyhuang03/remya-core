@@ -15,6 +15,7 @@
 - Rust crates live in `crates/<feature>/` under the root `Cargo.toml` workspace. Group backend functionality by feature; create crates only for concrete responsibility or dependency boundaries. `crates/service` is the daemon; do not turn it into a catch-all for feature logic.
 - Keep the Flutter-free daemon free of UI concerns. `packages/remya_client` stays pure Dart (no Flutter); `packages/remya_ui` holds the theme adapter, shared identity assets and the app-agnostic settings-window components (`lib/settings_ui.dart`) that give every Remya settings window the Settings look; it can provide reusable editors for shared Remya preferences through the public Dart client. System and app-owned pages, catalog logic and native backend code stay outside the UI package.
 - Applications consume the packages through a git dependency pinned to a tag. Local development uses a gitignored `pubspec_overrides.yaml` pointing at a local checkout.
+- Bar's candidate workflow instead builds from a sibling Core checkout at a verified, full commit SHA and records that SHA in the candidate metadata.
 
 ## Public Interfaces
 - The daemon runs as the ordinary user, starts with the graphical session through the `top.remya.core.service` systemd user unit and is D-Bus activatable as `top.remya.Core1`. It owns configuration, reconciliation and CLI/D-Bus dispatch.
@@ -36,7 +37,7 @@
 - Assume fish is the user's default shell. Persist appearance-related environment variables only through fish and Hyprland configuration.
 - NetworkManager is the only network backend.
 - Target current Arch Linux packages; do not add compatibility layers for older system libraries or services.
-- Always invoke Dart as `fvm dart ...`. `.fvmrc` pins Flutter to `3.47.8`; do not change versions without explicit instruction.
+- Always invoke Dart as `fvm dart ...`. `.fvmrc` is the source of truth for the Flutter version. Do not change it without explicit instruction.
 - Use the root `rust-toolchain.toml` and inherit common crate metadata from the workspace. Commit `.fvmrc`, `pubspec.lock` files and `Cargo.lock`.
 - Reuse existing helpers and dependencies; add packages only for concrete requirements.
 - This project uses the PolyForm Noncommercial License 1.0.0 (`LICENSE`). Check dependency license compatibility and preserve third-party notices. Prefer permissive licenses; keep LGPL libraries dynamically linked or in separate processes; do not introduce GPL, AGPL, SSPL or other incompatible strong-copyleft code.

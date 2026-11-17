@@ -69,7 +69,7 @@ jobs:
           fvm install "$flutter_version" --skip-pub-get
           git diff --check HEAD^ HEAD
           cargo fmt --all -- --check
-          (cd packages/remya_client && fvm dart pub get --enforce-lockfile && fvm dart analyze)
+          (cd packages/remya_client && fvm dart pub get --enforce-lockfile && fvm dart analyze && fvm dart test)
           (cd packages/remya_ui && fvm flutter pub get --enforce-lockfile && fvm flutter analyze --no-pub && fvm flutter test --no-pub)
           (cd tool && fvm dart pub get --enforce-lockfile && fvm dart analyze)
           fvm dart format --output=none --set-exit-if-changed packages tool

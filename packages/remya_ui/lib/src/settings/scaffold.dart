@@ -105,9 +105,7 @@ class RemyaSettingsScaffold extends StatelessWidget {
         );
     return CallbackShortcuts(
       bindings: {
-        if (onBack case final onBack?)
-          const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true):
-              onBack,
+        const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): ?onBack,
       },
       child: RemyaSettingsLayout(
         loading: loading,

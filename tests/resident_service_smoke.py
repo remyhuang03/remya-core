@@ -33,13 +33,17 @@ def checks():
                 if time.monotonic() > deadline:
                     raise
                 time.sleep(.1)
-        initial = pss(service.pid)
+        # The standalone theme read can finish before other subsystems warm up.
+        # Measure repeated reloads after the first full read.
+        call('reload')
+        assert call('get', 'date-time')['timezone']
+        warmed = pss(service.pid)
         for _ in range(3):
             call('reload')
             assert call('get', 'date-time')['timezone']
         closed = pss(service.pid)
-        assert closed - initial < 5 * 1024, 'Resident memory grew unexpectedly'
-        output = {'initial_pss_kib': initial, 'after_reload_pss_kib': closed}
+        assert closed - warmed < 5 * 1024, 'Resident memory grew unexpectedly'
+        output = {'warmed_pss_kib': warmed, 'after_reload_pss_kib': closed}
         print('PASS: standalone Core residency and reload:', output)
         call('quit')
         service.wait(timeout=10)

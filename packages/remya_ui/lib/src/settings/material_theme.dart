@@ -58,8 +58,16 @@ class _RemyaMaterialThemeSettingsState
 
   @override
   void dispose() {
-    unawaited(_changes.cancel());
-    if (widget.client == null) unawaited(_client.close());
+    final cancel = _changes.cancel();
+    if (widget.client == null) {
+      unawaited(
+        cancel
+            .catchError((Object _) {})
+            .whenComplete(() => _client.close().catchError((Object _) {})),
+      );
+    } else {
+      unawaited(cancel.catchError((Object _) {}));
+    }
     super.dispose();
   }
 

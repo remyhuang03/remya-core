@@ -1,6 +1,11 @@
 //! Request paths whose work must not run under the system-feature State lock.
-use crate::{ai, paths::Roots, state::State};
+use crate::{
+    ai,
+    paths::Roots,
+    state::{SharedTheme, State},
+};
 use remya_applications as applications;
+use remya_background::{BackgroundManager, RealDesktop};
 use serde_json::Value;
 use std::{
     collections::BTreeSet,
@@ -10,12 +15,14 @@ use std::{
 #[derive(Clone)]
 pub struct Requests {
     pub ai: Arc<ai::Ai>,
+    pub theme: Arc<Mutex<SharedTheme>>,
+    pub background: Arc<Mutex<BackgroundManager<RealDesktop>>>,
     pub apps: Arc<Mutex<remya_app_preferences::Store>>,
     catalog_prefixes: Arc<BTreeSet<String>>,
 }
 
 impl Requests {
-    pub fn new(roots: &Roots, catalog: &Value) -> Self {
+    pub fn new(roots: &Roots, catalog: &Value, background: BackgroundManager<RealDesktop>) -> Self {
         let mut prefixes = BTreeSet::new();
         for page in catalog["pages"].as_array().unwrap() {
             prefixes.insert(
@@ -42,6 +49,10 @@ impl Requests {
             }
         }
         Self {
+            theme: Arc::new(Mutex::new(SharedTheme::new(
+                roots.shared.join("theme.toml"),
+            ))),
+            background: Arc::new(Mutex::new(background)),
             ai: Arc::new(ai::Ai::new(
                 roots.shared.join("ai.toml"),
                 roots.cache.join("models-dev.json"),
@@ -82,6 +93,8 @@ impl Requests {
             "Get" if ai::Ai::is_get(key) => Some(self.ai.get(key)),
             "Set" if ai::SET_IDS.contains(&key) => Some(self.ai.set(key, &args[1])),
             "Get" => match key {
+                "theme" => Some(self.theme.lock().unwrap().read()),
+                "accent" => Some(Ok(self.background.lock().unwrap().accent_state())),
                 "installed-apps" => Some(applications::read()),
                 _ if key.starts_with("installed-apps:") => Some(applications::search(&key[15..])),
                 _ if key.starts_with("installed-app:") => Some(applications::details(&key[14..])),

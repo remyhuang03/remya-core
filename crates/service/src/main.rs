@@ -26,6 +26,141 @@ fn return_error(invocation: gio::DBusMethodInvocation, error: &str) {
         .unwrap_or(("OperationFailed", error));
     invocation.return_dbus_error(&format!("{INTERFACE}.{kind}"), message);
 }
+/// Capture change payloads with the operation's state on the worker, so
+/// broadcasting them on the main loop never needs the system-feature lock.
+fn changed_payloads(
+    state: &state::State,
+    method: &str,
+    args: &[String],
+    before: (serde_json::Value, serde_json::Value),
+) -> Vec<(&'static str, serde_json::Value)> {
+    let mut signals = Vec::new();
+    let theme = state.theme_state();
+    if theme != before.0 {
+        signals.push(("theme", theme));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "appearance" || id == remya_appearance::APPLY_TO_SYSTEM)
+    {
+        signals.push(("appearance", state.appearance.state()));
+    }
+    signals.push(("date-time", state.date_state()));
+    signals.push(("display", state.display.state()));
+    signals.push(("hostname", state.hostname_state()));
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "night-light" || remya_display::is_night_light_setting(id))
+    {
+        signals.push(("night-light", state.night_light.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "network" || remya_network::is_network_setting(id))
+    {
+        signals.push(("network", state.network.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id.starts_with("defaults.") || id == "default-apps")
+    {
+        signals.push(("default-apps", state.default_apps.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "startup" || remya_startup::IDS.contains(&id.as_str()))
+    {
+        signals.push(("startup", state.startup.state()));
+    }
+    signals.push(("background", state.background_state()));
+    let accent = state.accent_state();
+    if accent != before.1 {
+        signals.push(("accent", accent));
+    }
+    if args.first().is_some_and(|id| id.starts_with("installed.")) {
+        signals.push(("installed-apps", serde_json::json!({})));
+    }
+    if args
+        .first()
+        .is_some_and(|id| remya_system_information::account::IDS.contains(&id.as_str()))
+        && let Ok(account) = state.account.read()
+    {
+        signals.push(("account-information", account));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "input" || remya_input::is_setting(id))
+    {
+        signals.push(("input", state.input.state()));
+    }
+    if method == "Reload"
+        || args.first().is_some_and(|id| {
+            id == remya_date_time::language::FEATURE || remya_date_time::language::is_setting(id)
+        })
+    {
+        signals.push(("language", state.language.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "desktop" || remya_input::is_desktop_setting(id))
+    {
+        signals.push(("desktop", state.desktop.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "themes" || remya_appearance::packs::is_setting(id))
+    {
+        signals.push(("themes", state.themes.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "text-size" || remya_appearance::text_size::is_setting(id))
+    {
+        signals.push(("text-size", state.text_size.state()));
+    }
+    if method == "Reload"
+        || args.first().is_some_and(|id| {
+            id == "power"
+                || id == "battery-saver"
+                || (id != remya_power::KEEP_AWAKE && remya_power::is_setting(id))
+        })
+    {
+        signals.push(("power", state.power.state()));
+    }
+    if method == "Reload"
+        || args
+            .first()
+            .is_some_and(|id| id == "sound" || remya_sound::is_setting(id))
+    {
+        signals.push(("sound", state.sound.state()));
+    }
+    if method == "Reload"
+        || args.first().is_some_and(|id| {
+            id == "cameras" || id.starts_with("cameras:") || remya_camera::is_setting(id)
+        })
+    {
+        signals.push(("cameras", state.cameras.state()));
+    }
+    if args.first().is_some_and(|id| remya_updates::is_setting(id)) {
+        signals.push(("updates", state.updates.state()));
+    }
+    if args
+        .first()
+        .is_some_and(|id| remya_fonts::IDS.contains(&id.as_str()))
+    {
+        signals.push(("fonts", serde_json::json!({})));
+    }
+    signals
+}
 fn main() {
     if let Err(e) = run() {
         eprintln!("{e}");
@@ -45,6 +180,7 @@ fn run() -> Result<(), String> {
     let initial = state::State::new(paths::Roots::detect(debug)?);
     let (ai_changed, ai_changes) = std::sync::mpsc::channel();
     initial.requests.ai.set_notifier(ai_changed);
+    initial.requests.ai.set_secret_bus(bus.clone());
     let ai = initial.requests.ai.clone();
     let ai_bus = bus.clone();
     std::thread::spawn(move || {
@@ -55,6 +191,7 @@ fn run() -> Result<(), String> {
         }
     });
     let requests = initial.requests.clone();
+    let apps = requests.apps.clone();
     let appimages = initial.appimages.clone();
     let storage = initial.storage.clone();
     let bluetooth = initial.bluetooth.clone();
@@ -81,10 +218,17 @@ fn run() -> Result<(), String> {
                 let worker = state.clone();
                 let work_method = method.clone();
                 let work_args = args.clone();
-                if let Some(result) =
-                    gio::spawn_blocking(move || requests.execute(&worker, &work_method, &work_args))
-                        .await
-                        .expect("independent request worker panicked")
+                if let Some(result) = gio::spawn_blocking(move || {
+                    let result = requests.execute(&worker, &work_method, &work_args);
+                    if work_method == "Reload"
+                        || (work_method == "Get" && work_args[0] == "configuration")
+                    {
+                        requests.apps.lock().unwrap().rescan();
+                    }
+                    result
+                })
+                .await
+                .expect("independent request worker panicked")
                 {
                     match result {
                         Ok(value) => {
@@ -110,48 +254,28 @@ fn run() -> Result<(), String> {
                 let worker = state.clone();
                 let work_method = method.clone();
                 let work_args = args.clone();
-                let (
-                    result,
-                    theme,
-                    date,
-                    display,
-                    hostname,
-                    default_apps,
-                    background,
-                    accent,
-                    theme_changed,
-                    accent_changed,
-                    theme_error,
-                ) = gio::spawn_blocking(move || {
+                let (result, signals) = gio::spawn_blocking(move || {
                     let mut state = worker.lock().unwrap();
-                    let before = state.theme.clone();
-                    let accent_before = state.background.accent_state();
+                    let notify =
+                        ["Set", "Resolve", "Manage", "Reload"].contains(&work_method.as_str());
+                    let before = notify.then(|| (state.theme_state(), state.accent_state()));
                     let result = state.execute(&work_method, &work_args);
-                    let theme_error =
-                        if work_method == "Set" && shared_theme::field(&work_args[0]).is_some() {
-                            result.as_ref().err().cloned()
-                        } else {
-                            None
-                        };
                     if let Err(error) = &result
                         && work_method == "Set"
                         && work_args[0].starts_with("date-time.")
                     {
                         state.date_error = Some(error.clone());
                     }
-                    (
-                        result,
-                        state.theme.clone(),
-                        state.configuration()["date-time"].clone(),
-                        state.display.state(),
-                        state.hostname_state(),
-                        state.default_apps.state(),
-                        state.background.state(),
-                        state.background.accent_state(),
-                        state.theme != before,
-                        state.background.accent_state() != accent_before,
-                        theme_error,
-                    )
+                    let mut signals = before
+                        .map(|before| changed_payloads(&state, &work_method, &work_args, before))
+                        .unwrap_or_default();
+                    if let Err(error) = &result
+                        && work_method == "Set"
+                        && shared_theme::field(&work_args[0]).is_some()
+                    {
+                        signals.push(("error", serde_json::json!({"message":error})));
+                    }
+                    (result, signals)
                 })
                 .await
                 .expect("service worker panicked");
@@ -189,140 +313,8 @@ fn run() -> Result<(), String> {
                     }
                     Err(error) => return_error(invocation, &error),
                 }
-                if ["Set", "Resolve", "Manage", "Reload"].contains(&method.as_str()) {
-                    if theme_changed {
-                        signal(&bus, "theme", &theme);
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "appearance" || id == remya_appearance::APPLY_TO_SYSTEM
-                        })
-                    {
-                        signal(
-                            &bus,
-                            "appearance",
-                            &state.lock().unwrap().appearance.state(),
-                        );
-                    }
-                    signal(&bus, "date-time", &date);
-                    signal(&bus, "display", &display);
-                    signal(&bus, "hostname", &hostname);
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "night-light" || remya_display::is_night_light_setting(id)
-                        })
-                    {
-                        let night_light = state.lock().unwrap().night_light.state();
-                        signal(&bus, "night-light", &night_light);
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "network" || remya_network::is_network_setting(id)
-                        })
-                    {
-                        let network = state.lock().unwrap().network.state();
-                        signal(&bus, "network", &network);
-                    }
-                    if method == "Reload"
-                        || args
-                            .first()
-                            .is_some_and(|id| id.starts_with("defaults.") || id == "default-apps")
-                    {
-                        signal(&bus, "default-apps", &default_apps);
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "startup" || remya_startup::IDS.contains(&id.as_str())
-                        })
-                    {
-                        signal(&bus, "startup", &state.lock().unwrap().startup.state());
-                    }
-                    signal(&bus, "background", &background);
-                    if accent_changed {
-                        signal(&bus, "accent", &accent);
-                    }
-                    if args.first().is_some_and(|id| id.starts_with("installed.")) {
-                        signal(&bus, "installed-apps", &serde_json::json!({}));
-                    }
-                    if args.first().is_some_and(|id| {
-                        remya_system_information::account::IDS.contains(&id.as_str())
-                    }) && let Ok(account) = state.lock().unwrap().account.read()
-                    {
-                        signal(&bus, "account-information", &account);
-                    }
-                    if method == "Reload"
-                        || args
-                            .first()
-                            .is_some_and(|id| id == "input" || remya_input::is_setting(id))
-                    {
-                        signal(&bus, "input", &state.lock().unwrap().input.state());
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == remya_date_time::language::FEATURE
-                                || remya_date_time::language::is_setting(id)
-                        })
-                    {
-                        signal(&bus, "language", &state.lock().unwrap().language.state());
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "desktop" || remya_input::is_desktop_setting(id)
-                        })
-                    {
-                        signal(&bus, "desktop", &state.lock().unwrap().desktop.state());
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "themes" || remya_appearance::packs::is_setting(id)
-                        })
-                    {
-                        signal(&bus, "themes", &state.lock().unwrap().themes.state());
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "text-size" || remya_appearance::text_size::is_setting(id)
-                        })
-                    {
-                        signal(&bus, "text-size", &state.lock().unwrap().text_size.state());
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "power"
-                                || id == "battery-saver"
-                                || (id != remya_power::KEEP_AWAKE && remya_power::is_setting(id))
-                        })
-                    {
-                        signal(&bus, "power", &state.lock().unwrap().power.state());
-                    }
-                    if method == "Reload"
-                        || args
-                            .first()
-                            .is_some_and(|id| id == "sound" || remya_sound::is_setting(id))
-                    {
-                        signal(&bus, "sound", &state.lock().unwrap().sound.state());
-                    }
-                    if method == "Reload"
-                        || args.first().is_some_and(|id| {
-                            id == "cameras"
-                                || id.starts_with("cameras:")
-                                || remya_camera::is_setting(id)
-                        })
-                    {
-                        signal(&bus, "cameras", &state.lock().unwrap().cameras.state());
-                    }
-                    if args.first().is_some_and(|id| remya_updates::is_setting(id)) {
-                        signal(&bus, "updates", &state.lock().unwrap().updates.state());
-                    }
-                    if args
-                        .first()
-                        .is_some_and(|id| remya_fonts::IDS.contains(&id.as_str()))
-                    {
-                        signal(&bus, "fonts", &serde_json::json!({}));
-                    }
-                }
-                if let Some(message) = theme_error {
-                    signal(&bus, "error", &serde_json::json!({"message":message}));
+                for (topic, value) in signals {
+                    signal(&bus, topic, &value);
                 }
                 if let Some(page) = opened_page {
                     signal(&bus, "navigation", &serde_json::json!({"page":page}));
@@ -334,11 +326,7 @@ fn run() -> Result<(), String> {
                             .expect("authorization worker");
                         state.lock().unwrap().finish_authorization(result);
                     }
-                    signal(
-                        &bus,
-                        "date-time",
-                        &state.lock().unwrap().configuration()["date-time"],
-                    );
+                    signal(&bus, "date-time", &state.lock().unwrap().date_state());
                 }
                 if opened_page.is_some() {
                     signal(&bus, "hostname", &state.lock().unwrap().hostname_state());
@@ -369,6 +357,7 @@ fn run() -> Result<(), String> {
         return Ok(());
     }
     {
+        apps.lock().unwrap().rescan();
         let mut state = state.lock().unwrap();
         state.ensure_idle();
         state.refresh();
@@ -448,12 +437,14 @@ fn run() -> Result<(), String> {
         let state = polling.clone();
         let bus = poll_bus.clone();
         if ticks.is_multiple_of(30) {
+            let apps = apps.clone();
             std::thread::spawn(move || {
+                apps.lock().unwrap().rescan();
                 let mut s = state.lock().unwrap();
-                let before = s.theme.clone();
+                let before = s.theme_state();
                 let appearance = s.appearance.state();
                 let errors = s.theme_error.clone();
-                let accent = s.background.accent_state();
+                let accent = s.accent_state();
                 let network = s.network.state();
                 let night_light = s.night_light.state();
                 let sound = s.sound.state();
@@ -475,22 +466,22 @@ fn run() -> Result<(), String> {
                 if s.network.state() != network {
                     signal(&bus, "network", &s.network.state());
                 }
-                if s.background.accent_state() != accent {
-                    signal(&bus, "accent", &s.background.accent_state());
+                if s.accent_state() != accent {
+                    signal(&bus, "accent", &s.accent_state());
                 }
                 if s.appearance.state() != appearance {
                     signal(&bus, "appearance", &s.appearance.state());
                 }
-                if s.theme != before {
-                    signal(&bus, "theme", &s.theme);
+                if s.theme_state() != before {
+                    signal(&bus, "theme", &s.theme_state());
                 }
                 if s.theme_error != errors {
                     signal(&bus, "error", &serde_json::json!({"message":s.theme_error}));
                 }
-                signal(&bus, "date-time", &s.configuration()["date-time"]);
+                signal(&bus, "date-time", &s.date_state());
                 signal(&bus, "hostname", &s.hostname_state());
                 signal(&bus, "display", &s.display.state());
-                signal(&bus, "background", &s.background.state());
+                signal(&bus, "background", &s.background_state());
             });
         }
         glib::ControlFlow::Continue

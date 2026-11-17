@@ -200,9 +200,10 @@ write `{"error":{"code":"...","message":"..."}}` to stderr. D-Bus calls have
 a 30-second client deadline. Values are never represented as applied merely
 because a request was accepted.
 
-D-Bus operations serialize. GUI changes and external reloads also serialize in
-the same controller. Rust retains its cross-process lock, validation, atomic
-writes, independent readback, and rollback. Do not start a second independent
+System-setting writes and refreshes serialize through the daemon. Shared theme
+and accent reads and application preference operations can proceed during an
+unrelated system refresh. Rust retains its cross-process lock, validation,
+atomic writes, independent readback, and rollback. Do not start a second independent
 writer against the same TOML file; native application registration enforces one
 settings instance per session. Read-only operations do not write system settings;
 `Set` is the explicit write boundary.
@@ -1450,7 +1451,10 @@ Each successful Set returns the current `ai.providers` Get reply and emits
   the provider supports that credential) or `config clear-credential`, with
   readback through the redacted `config dump`. Custom endpoints accept only an
   API key, stored with `secret-tool store` or removed with `secret-tool clear`.
-  Secrets are passed only on stdin, never as arguments.
+  Custom API keys are limited to 8191 bytes. Keyring operations have a
+  three-second deadline, including verification for clear. Unlock a locked
+  collection before removing its credential. Secrets are passed only on stdin,
+  never as arguments.
 - `ai.custom` `{"add":{"name","baseUrl","modelsDev"?,"apiKey"?}}` or
   `{"remove":"custom-<slug>"}`. The id is `custom-<slug>` generated from the
   name (ASCII letters and digits, other runs become `-`) and must be unique.

@@ -119,21 +119,62 @@ fn background_paths(roots: &Roots) -> Paths {
     }
 }
 
+/// File-backed shared theme state, serialized independently of system refreshes.
+pub struct SharedTheme {
+    path: PathBuf,
+    default_mode: &'static str,
+    pub value: Value,
+}
+impl SharedTheme {
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            default_mode: "light",
+            value: shared_theme::defaults("light"),
+        }
+    }
+
+    pub fn read(&self) -> Result<Value, String> {
+        if let Some(value) = load(&self.path)? {
+            shared_theme::normalize(value)
+        } else {
+            let defaults = shared_theme::defaults(self.default_mode);
+            write(&self.path, &defaults)?;
+            Ok(defaults)
+        }
+    }
+
+    fn refresh(&mut self, system_mode: Option<SystemThemeMode>) -> Result<(), String> {
+        self.default_mode = match system_mode {
+            Some(SystemThemeMode::Dark) => "dark",
+            _ => "light",
+        };
+        self.value = self.read()?;
+        Ok(())
+    }
+
+    fn set(&mut self, field: &str, value: &str) -> Result<Value, String> {
+        let mut next = self.read()?;
+        next["theme"][field] = json!(value);
+        let next = shared_theme::normalize(next).map_err(|error| invalid(&error))?;
+        write(&self.path, &next)?;
+        self.value = next;
+        Ok(self.value.clone())
+    }
+}
+
 pub struct State {
     pub catalog: Value,
-    pub theme: Value,
     pub appearance: DesktopTheme,
     pub date: Value,
     pub hostname: HostnameManager,
     pub account: AccountInformation,
     roots: Roots,
-    config: PathBuf,
     saved: Value,
     pub theme_error: Option<String>,
     pub date_error: Option<String>,
     pub display: DisplayManager<Hyprctl>,
     pub night_light: NightLight<RealSunset>,
-    pub background: BackgroundManager<RealDesktop>,
     fonts: FontManager<RealFontconfig>,
     pub default_apps: DefaultApps<default_apps::RealDesktop>,
     pub startup: Startup<startup::RealSystemd>,
@@ -163,14 +204,16 @@ pub struct State {
 }
 impl State {
     pub fn new(roots: Roots) -> Self {
-        let config = roots.shared.join("theme.toml");
         let catalog: Value =
             serde_json::from_str(include_str!("../../../assets/catalog.json")).expect("catalog");
-        let requests = crate::requests::Requests::new(&roots, &catalog);
+        let requests = crate::requests::Requests::new(
+            &roots,
+            &catalog,
+            BackgroundManager::new(RealDesktop, background_paths(&roots)),
+        );
         Self {
             catalog,
             requests,
-            theme: shared_theme::defaults("light"),
             appearance: DesktopTheme::new(roots.system.join("appearance.toml")),
             date: json!({}),
             hostname: HostnameManager::new(roots.system.join("hostname.toml"), atomic_write),
@@ -185,7 +228,6 @@ impl State {
                 hypr_config_dir().join("hyprsunset.conf"),
                 roots.system.join("night-light.toml"),
             ),
-            background: BackgroundManager::new(RealDesktop, background_paths(&roots)),
             fonts: FontManager::new(
                 RealFontconfig,
                 fonts::user_font_directory().unwrap_or_default(),
@@ -245,7 +287,6 @@ impl State {
             auth_attempted: false,
             restart_suggested: false,
             navigation: "home".into(),
-            config,
             roots,
         }
     }
@@ -253,7 +294,6 @@ impl State {
         self.roots.system.join("date-time.toml")
     }
     pub fn refresh(&mut self) {
-        self.requests.apps.lock().unwrap().rescan();
         self.appearance.refresh();
         self.theme_error = self.refresh_theme().err();
         self.date_error = self.refresh_date().err();
@@ -271,24 +311,26 @@ impl State {
         let _ = self.display.refresh();
         // Failures stay in the manager's state for every reader.
         let _ = self.night_light.refresh();
-        let _ = self.background.refresh();
+        let _ = self.requests.background.lock().unwrap().refresh();
         let _ = self.sound.refresh();
         let _ = self.power.refresh();
         let _ = self.cameras.refresh();
     }
     fn refresh_theme(&mut self) -> Result<(), String> {
-        self.theme = if let Some(value) = load(&self.config)? {
-            shared_theme::normalize(value)?
-        } else {
-            let mode = match self.appearance.system().mode {
-                Some(SystemThemeMode::Dark) => "dark",
-                _ => "light",
-            };
-            let defaults = shared_theme::defaults(mode);
-            write(&self.config, &defaults)?;
-            defaults
-        };
-        Ok(())
+        self.requests
+            .theme
+            .lock()
+            .unwrap()
+            .refresh(self.appearance.system().mode)
+    }
+    pub fn theme_state(&self) -> Value {
+        self.requests.theme.lock().unwrap().value.clone()
+    }
+    pub fn background_state(&self) -> Value {
+        self.requests.background.lock().unwrap().state()
+    }
+    pub fn accent_state(&self) -> Value {
+        self.requests.background.lock().unwrap().accent_state()
     }
     fn refresh_date(&mut self) -> Result<(), String> {
         let observed = clock::read_date_time()?;
@@ -458,10 +500,13 @@ impl State {
         self.hostname.finish(name, result)?;
         Ok(self.hostname_state())
     }
-    pub fn configuration(&self) -> Value {
+    pub fn date_state(&self) -> Value {
         let mut date = self.date.clone();
         date["error"] = json!(self.date_error.as_ref().or(self.auth_error.as_ref()));
-        json!({"appearance": self.appearance.state(),"date-time":date,"display":self.display.state(),"night-light":self.night_light.state(),"hostname":self.hostname_state(),"background":self.background.state(),"default-apps":self.default_apps.state(),"startup":self.startup.state(),"input":self.input.state(),"language":self.language.state(),"desktop":self.desktop.state(),"themes":self.themes.state(),"text-size":self.text_size.state(),"network":self.network.state(),"sound":self.sound.state(),"power":self.power.state(),"cameras":self.cameras.state()})
+        date
+    }
+    pub fn configuration(&self) -> Value {
+        json!({"appearance": self.appearance.state(),"date-time":self.date_state(),"display":self.display.state(),"night-light":self.night_light.state(),"hostname":self.hostname_state(),"background":self.background_state(),"default-apps":self.default_apps.state(),"startup":self.startup.state(),"input":self.input.state(),"language":self.language.state(),"desktop":self.desktop.state(),"themes":self.themes.state(),"text-size":self.text_size.state(),"network":self.network.state(),"sound":self.sound.state(),"power":self.power.state(),"cameras":self.cameras.state()})
     }
     pub fn controls(&self) -> Vec<&Value> {
         self.catalog["pages"]
@@ -479,8 +524,7 @@ impl State {
                 let key = args[0].as_str();
                 match key {
                     "theme" => {
-                        self.refresh_theme()?;
-                        Ok(self.theme.clone())
+                        self.requests.theme.lock().unwrap().read()
                     }
                     "appearance" => {
                         self.appearance.refresh();
@@ -497,9 +541,9 @@ impl State {
                         Ok(control)
                     }
                     STYLE | MODE | CONTRAST => {
-                        self.refresh_theme()?;
+                        let theme = self.requests.theme.lock().unwrap().read()?;
                         Ok(
-                            json!({"id": key,"availability":"available","reason":self.controls().into_iter().find(|c|c["id"]==key).unwrap()["reason"],"value":self.theme["theme"][shared_theme::field(key).unwrap()]}),
+                            json!({"id": key,"availability":"available","reason":self.controls().into_iter().find(|c|c["id"]==key).unwrap()["reason"],"value":theme["theme"][shared_theme::field(key).unwrap()]}),
                         )
                     }
                     "configuration" => {
@@ -572,28 +616,29 @@ impl State {
                         }))
                     }
                     "background" => {
-                        let _ = self.background.refresh();
-                        Ok(self.background.state())
+                        let _ = self.requests.background.lock().unwrap().refresh();
+                        Ok(self.background_state())
                     }
-                    "accent" => Ok(self.background.accent_state()),
+                    "accent" => Ok(self.accent_state()),
                     _ if is_background_setting(key) || is_accent_setting(key) => {
-                        let _ = self.background.refresh();
+                        let mut background = self.requests.background.lock().unwrap();
+                        let _ = background.refresh();
                         let control = self
                             .controls()
                             .into_iter()
                             .find(|c| c["id"] == key)
                             .ok_or_else(|| invalid("Unknown setting"))?;
                         let value = if is_accent_setting(key) {
-                            self.background.accent_value(key)
+                            background.accent_value(key)
                         } else {
-                            self.background.setting_value(key)
+                            background.setting_value(key)
                         };
                         Ok(json!({
                             "id": key,
                             "availability": control["availability"],
                             "reason": control["reason"],
                             "value": value,
-                            "error": self.background.error(),
+                            "error": background.error(),
                         }))
                     }
                     // Polled every second: answered from the last state, without a NM read.
@@ -876,10 +921,7 @@ impl State {
             "Open" => {
                 let page = &args[0];
                 if page == "repository" {
-                    Command::new("xdg-open")
-                        .arg("https://github.com/remyhuang03/remya-settings")
-                        .spawn()
-                        .map_err(|e| e.to_string())?;
+                    open_repository_url()?;
                 } else {
                     if !["home", "about", "licenses"].contains(&page.as_str())
                         && !self.catalog["pages"]
@@ -904,7 +946,7 @@ impl State {
                     return Err(error.clone());
                 }
                 Ok(
-                    json!({"theme":self.theme,"system":self.appearance.system(),"configuration":self.configuration()}),
+                    json!({"theme":self.theme_state(),"system":self.appearance.system(),"configuration":self.configuration()}),
                 )
             }
             "Restart" => {
@@ -1133,10 +1175,15 @@ impl State {
             return self.night_light.set(key, value);
         }
         if is_background_setting(key) {
-            return self.background.set(key, value);
+            return self.requests.background.lock().unwrap().set(key, value);
         }
         if is_accent_setting(key) {
-            return self.background.set_accent(key, value);
+            return self
+                .requests
+                .background
+                .lock()
+                .unwrap()
+                .set_accent(key, value);
         }
         if fonts::IDS.contains(&key) {
             return match key {
@@ -1151,8 +1198,8 @@ impl State {
                     "Use apply to apply the Remy'a theme mode to the system",
                 ));
             }
-            self.refresh_theme()?;
-            let mode = if self.theme["theme"]["theme_mode"] == "dark" {
+            let theme = self.requests.theme.lock().unwrap().read()?;
+            let mode = if theme["theme"]["theme_mode"] == "dark" {
                 SystemThemeMode::Dark
             } else {
                 SystemThemeMode::Light
@@ -1160,14 +1207,9 @@ impl State {
             return self.appearance.apply(mode);
         }
         if let Some(field) = shared_theme::field(key) {
-            self.refresh_theme()?;
-            let mut next = self.theme.clone();
-            next["theme"][field] = json!(value);
-            let next = shared_theme::normalize(next).map_err(|error| invalid(&error))?;
-            write(&self.config, &next)?;
-            self.theme = next;
+            let value = self.requests.theme.lock().unwrap().set(field, value)?;
             self.theme_error = None;
-            return Ok(self.theme.clone());
+            return Ok(value);
         }
         self.refresh_date()?;
         let (request, keys) = match key {
@@ -1243,7 +1285,7 @@ impl State {
             "default-apps" => self.default_apps.manage()?,
             "startup" => self.startup.manage()?,
             "network" => self.network.manage()?,
-            "background" => self.background.manage()?,
+            "background" => self.requests.background.lock().unwrap().manage()?,
             "power" => self.power.manage()?,
             "cameras" => self.cameras.manage()?,
             "cleanup" => self.storage.manage()?,
@@ -1322,7 +1364,7 @@ impl State {
             return Ok(self.configuration());
         }
         if feature == "background" {
-            self.background.resolve(source)?;
+            self.requests.background.lock().unwrap().resolve(source)?;
             return Ok(self.configuration());
         }
         if !["system", "settings"].contains(&source) {
@@ -1436,6 +1478,79 @@ impl Drop for State {
     }
 }
 
+const MAX_REAPED_CHILDREN: usize = 16;
+
+/// Bounded nonblocking reaper for short-lived fire-and-forget subprocesses.
+struct ChildReaper {
+    children: Vec<Child>,
+    running: bool,
+    capacity: usize,
+}
+
+impl ChildReaper {
+    const fn new(capacity: usize) -> Self {
+        Self {
+            children: Vec::new(),
+            running: false,
+            capacity,
+        }
+    }
+
+    fn reap_finished(&mut self) -> usize {
+        self.children
+            .retain_mut(|child| matches!(child.try_wait(), Ok(None)));
+        self.children.len()
+    }
+
+    fn spawn(reaper: &'static Mutex<Self>, command: &mut Command) -> Result<(), String> {
+        let mut state = reaper.lock().unwrap_or_else(|e| e.into_inner());
+        if state.reap_finished() >= state.capacity {
+            return Err("Busy:Too many open requests in progress".into());
+        }
+        let child = command.spawn().map_err(|e| e.to_string())?;
+        state.children.push(child);
+        if !state.running {
+            state.running = true;
+            std::thread::spawn(move || Self::reap_loop(reaper));
+        }
+        Ok(())
+    }
+
+    fn reap_loop(reaper: &'static Mutex<Self>) {
+        let mut delay = std::time::Duration::from_millis(50);
+        loop {
+            std::thread::sleep(delay);
+            let mut state = reaper.lock().unwrap_or_else(|e| e.into_inner());
+            if state.reap_finished() == 0 {
+                state.running = false;
+                return;
+            }
+            delay = (delay * 2).min(std::time::Duration::from_millis(500));
+        }
+    }
+
+    #[cfg(test)]
+    fn kill_all(&mut self) {
+        for child in &mut self.children {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+        self.children.clear();
+    }
+}
+
+fn open_repository_url() -> Result<(), String> {
+    static REAPER: std::sync::OnceLock<Mutex<ChildReaper>> = std::sync::OnceLock::new();
+    let reaper = REAPER.get_or_init(|| Mutex::new(ChildReaper::new(MAX_REAPED_CHILDREN)));
+    let mut command = Command::new("xdg-open");
+    command
+        .arg("https://github.com/remyhuang03/remya-settings")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    ChildReaper::spawn(reaper, &mut command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1541,6 +1656,28 @@ mod tests {
     }
 
     #[test]
+    fn reading_theme_does_not_consume_a_pending_external_change() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("theme.toml");
+        let mut theme = SharedTheme::new(path.clone());
+        theme.refresh(Some(SystemThemeMode::Dark)).unwrap();
+        assert_eq!(theme.value["theme"]["theme_mode"], "dark");
+        let before = theme.value.clone();
+
+        let next = shared_theme::defaults("light");
+        write(&path, &next).unwrap();
+        assert_eq!(theme.read().unwrap(), next);
+        assert_eq!(theme.value, before);
+
+        theme.refresh(None).unwrap();
+        assert_eq!(theme.value, next);
+        fs::write(path, "invalid").unwrap();
+        assert!(theme.read().is_err());
+        assert!(theme.refresh(None).is_err());
+        assert_eq!(theme.value, next);
+    }
+
+    #[test]
     fn catalog_parity_bounds_and_unknown_operations() {
         let root = tempfile::tempdir().unwrap();
         let mut state = State::new(Roots::detect(Some(root.path().into())).unwrap());
@@ -1583,5 +1720,72 @@ mod tests {
                 .unwrap_err()
                 .starts_with("Unavailable:")
         );
+    }
+
+    #[test]
+    fn child_reaper_reaps_short_lived_processes_and_bounds_concurrency() {
+        let short_lived: &'static Mutex<ChildReaper> =
+            Box::leak(Box::new(Mutex::new(ChildReaper::new(4))));
+
+        assert!(
+            ChildReaper::spawn(
+                short_lived,
+                &mut Command::new("/nonexistent/remya-test-opener")
+            )
+            .is_err()
+        );
+        {
+            let mut guard = short_lived.lock().unwrap();
+            assert_eq!(guard.reap_finished(), 0);
+            assert!(!guard.running);
+        }
+
+        for _ in 0..4 {
+            ChildReaper::spawn(short_lived, Command::new("/bin/sh").args(["-c", "exit 0"]))
+                .unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let done = {
+                let mut guard = short_lived.lock().unwrap();
+                guard.reap_finished() == 0 && !guard.running
+            };
+            if done {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "reaper did not drain exited children in time"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+
+        let bounded: &'static Mutex<ChildReaper> =
+            Box::leak(Box::new(Mutex::new(ChildReaper::new(2))));
+        ChildReaper::spawn(bounded, Command::new("/bin/sleep").arg("5")).unwrap();
+        ChildReaper::spawn(bounded, Command::new("/bin/sleep").arg("5")).unwrap();
+        let err = ChildReaper::spawn(bounded, Command::new("/bin/sleep").arg("5")).unwrap_err();
+        assert!(err.starts_with("Busy:"), "{err}");
+
+        {
+            let mut guard = bounded.lock().unwrap();
+            guard.kill_all();
+        }
+        ChildReaper::spawn(bounded, Command::new("/bin/sh").args(["-c", "exit 0"])).unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let done = {
+                let mut guard = bounded.lock().unwrap();
+                guard.reap_finished() == 0 && !guard.running
+            };
+            if done {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "reaper did not drain recovered child in time"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 }

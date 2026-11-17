@@ -84,7 +84,9 @@ pub struct Ai {
     // The generation prevents an old in-flight probe from undoing a Set invalidation.
     probe: Mutex<ProbeCache>,
     models: Mutex<ModelsCache>,
-    writes: Mutex<()>,
+    codexbar_writes: Mutex<()>,
+    custom_writes: Mutex<()>,
+    secret_bus: std::sync::OnceLock<gio::DBusConnection>,
     notifier: Mutex<Option<mpsc::Sender<()>>>,
     run_probe: Box<RunProbe>,
 }
@@ -337,10 +339,24 @@ impl Ai {
             cache,
             probe: Mutex::new(ProbeCache::default()),
             models: Mutex::new(ModelsCache::default()),
-            writes: Mutex::new(()),
+            codexbar_writes: Mutex::new(()),
+            custom_writes: Mutex::new(()),
+            secret_bus: std::sync::OnceLock::new(),
             notifier: Mutex::new(None),
             run_probe: Box::new(codexbar::provider_usage),
         }
+    }
+
+    pub fn set_secret_bus(&self, bus: gio::DBusConnection) {
+        let _ = self.secret_bus.set(bus);
+    }
+
+    fn clear_secret(&self, id: &str) -> Result<(), String> {
+        let bus = self
+            .secret_bus
+            .get()
+            .ok_or("Unavailable:The Secret Service is unavailable.")?;
+        secrets::clear(bus, id)
     }
 
     pub fn set_notifier(&self, notifier: mpsc::Sender<()>) {
@@ -594,18 +610,13 @@ impl Ai {
     }
 
     pub fn set(self: &Arc<Self>, key: &str, request: &str) -> Result<Value, String> {
-        {
-            let _write = self.writes.lock().unwrap();
-            let result = match key {
-                PROVIDERS => self.set_provider(request),
-                CREDENTIAL => self.set_credential(request),
-                CUSTOM => self.set_custom(request),
-                _ => return Err(invalid("Unknown setting")),
-            };
-            result?;
-            let mut cache = self.probe.lock().unwrap();
-            cache.invalidate();
-        }
+        match key {
+            PROVIDERS => self.set_provider(request),
+            CREDENTIAL => self.set_credential(request),
+            CUSTOM => self.set_custom(request),
+            _ => return Err(invalid("Unknown setting")),
+        }?;
+        self.probe.lock().unwrap().invalidate();
         self.reply()
     }
 
@@ -636,6 +647,7 @@ impl Ai {
             .filter(|c: &Change| c.enabled.is_some() || c.source.is_some())
             .ok_or_else(|| invalid("Expected a provider id with enabled and/or source"))?;
         let path = codexbar::config_path()?;
+        let _write = self.codexbar_writes.lock().unwrap();
         let (automatic, rows, row) = Self::codexbar_provider(&path, &change.id)?;
         if let Some(source) = &change.source
             && (!SOURCES.contains(&source.as_str())
@@ -710,6 +722,7 @@ impl Ai {
             check_secret(secret)?;
         }
         if change.id.starts_with("custom-") {
+            let _write = self.custom_writes.lock().unwrap();
             if !Prefs::load(&self.prefs)?
                 .custom
                 .iter()
@@ -720,10 +733,11 @@ impl Ai {
             return match (&change.api_key, change.cookie.is_some()) {
                 (Some(key), _) => secrets::store(&change.id, key),
                 (None, true) => Err(invalid("Custom endpoints accept only an API key")),
-                (None, false) => secrets::clear(&change.id),
+                (None, false) => self.clear_secret(&change.id),
             };
         }
         let path = codexbar::config_path()?;
+        let _write = self.codexbar_writes.lock().unwrap();
         let (automatic, rows, row) = Self::codexbar_provider(&path, &change.id)?;
         let auth = &row["authentication"];
         if (change.api_key.is_some() && auth["supportsConfigAPIKey"] != true)
@@ -783,6 +797,8 @@ impl Ai {
             .ok()
             .filter(|c: &Change| c.add.is_some() != c.remove.is_some())
             .ok_or_else(|| invalid("Expected exactly one of add or remove"))?;
+        // Serialize keyring and preference changes together for custom endpoints.
+        let _write = self.custom_writes.lock().unwrap();
         let mut prefs = Prefs::load(&self.prefs)?;
         if let Some(id) = change.remove {
             let before = prefs.custom.len();
@@ -790,7 +806,7 @@ impl Ai {
             if prefs.custom.len() == before {
                 return Err(invalid("Unknown custom provider"));
             }
-            secrets::clear(&id)?;
+            self.clear_secret(&id)?;
             return prefs.save(&self.prefs);
         }
         let add = change.add.expect("add or remove");
@@ -822,7 +838,7 @@ impl Ai {
         }
         prefs.save(&self.prefs).inspect_err(|_| {
             if add.api_key.is_some() {
-                let _ = secrets::clear(&id);
+                let _ = self.clear_secret(&id);
             }
         })
     }
@@ -960,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn app_preferences_complete_while_ai_probes_and_system_work_are_blocked() {
+    fn shared_preferences_complete_while_ai_probes_and_system_work_are_blocked() {
         use crate::{paths::Roots, state::State};
         use std::{fs, sync::mpsc, thread};
 
@@ -1040,6 +1056,16 @@ mod tests {
         let app_state = state.clone();
         let app_requests = requests.clone();
         let app = thread::spawn(move || {
+            let theme = app_requests
+                .execute(&app_state, "Get", &["theme".into()])
+                .unwrap()
+                .unwrap();
+            let accent = app_requests
+                .execute(&app_state, "Get", &["accent".into()])
+                .unwrap()
+                .unwrap();
+            assert_eq!(theme["version"], 1);
+            assert!(accent["color"].as_str().is_some());
             let key = "remya-bar.clock-seconds".to_string();
             let get = app_requests
                 .execute(&app_state, "Get", std::slice::from_ref(&key))
@@ -1069,7 +1095,7 @@ mod tests {
         changes.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(changes.try_recv().is_err());
         app.join().unwrap();
-        let (get, set, replace) = reply.expect("app preferences waited for AI or State");
+        let (get, set, replace) = reply.expect("shared preferences waited for AI or State");
         assert_eq!(get["value"], false);
         assert_eq!(set["value"], true);
         assert_eq!(replace["value"], false);

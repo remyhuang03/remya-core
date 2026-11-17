@@ -80,8 +80,19 @@ class RemyaAccountController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    unawaited(_changes?.cancel());
-    unawaited(_ownedClient?.close());
+    final cancel = _changes?.cancel();
+    _changes = null;
+    final owned = _ownedClient;
+    _ownedClient = null;
+    if (owned != null) {
+      unawaited(
+        (cancel ?? Future<void>.value())
+            .catchError((Object _) {})
+            .whenComplete(() => owned.close().catchError((Object _) {})),
+      );
+    } else if (cancel != null) {
+      unawaited(cancel.catchError((Object _) {}));
+    }
     super.dispose();
   }
 }

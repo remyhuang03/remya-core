@@ -3,6 +3,8 @@ import 'dart:convert';
 
 import 'package:dbus/dbus.dart';
 
+import 'watch_stream.dart';
+
 const settingsBusName = 'top.remya.Core1';
 const settingsInterface = 'top.remya.Core1';
 const settingsObjectPath = '/top/remya/Core1';
@@ -27,8 +29,30 @@ const settingsMethods = {
 typedef SettingsChange = ({String topic, Map<String, dynamic> value});
 
 class SettingsClient {
-  SettingsClient({DBusClient? bus}) : _bus = bus ?? DBusClient.session();
+  /// Creates a client for `top.remya.Core1`.
+  ///
+  /// When [bus] is supplied, ownership stays with the caller unless [ownsBus]
+  /// is `true`, so [close] does not close a shared connection.
+  SettingsClient({DBusClient? bus, bool? ownsBus})
+    : _bus = _resolveBus(bus, ownsBus),
+      _ownsBus = ownsBus ?? (bus == null);
+
+  static DBusClient _resolveBus(DBusClient? bus, bool? ownsBus) {
+    if (bus == null && ownsBus == false) {
+      throw ArgumentError.value(
+        ownsBus,
+        'ownsBus',
+        'Cannot disown an internally created DBusClient.',
+      );
+    }
+    return bus ?? DBusClient.session();
+  }
+
   final DBusClient _bus;
+  final bool _ownsBus;
+  final _closeHooks = <Future<void> Function()>{};
+  Future<void>? _closing;
+  bool _closed = false;
   late final _object = DBusRemoteObject(
     _bus,
     name: settingsBusName,
@@ -84,22 +108,29 @@ class SettingsClient {
       .where((event) => event.name == settingsBusName)
       .map((event) => event.newOwner != null);
 
-  Stream<SettingsChange> watch() async* {
-    final pending = StreamController<SettingsChange>();
-    final subscription = changes.listen(pending.add, onError: pending.addError);
-    try {
-      yield (topic: 'theme', value: await call('Get', ['theme']));
-      await for (final change in pending.stream) {
-        // Treat buffered theme signals as invalidations to avoid stale snapshots.
-        yield change.topic == 'theme'
-            ? (topic: 'theme', value: await call('Get', ['theme']))
-            : change;
-      }
-    } finally {
-      await subscription.cancel();
-      unawaited(pending.close());
+  Stream<SettingsChange> watch() => watchChangesStream<SettingsChange>(
+    source: changes,
+    initial: () async => (topic: 'theme', value: await call('Get', ['theme'])),
+    onChange: (change) async => change.topic == 'theme'
+        ? (topic: 'theme', value: await call('Get', ['theme']))
+        : change,
+    closeHooks: _closeHooks,
+    isClosed: () => _closed,
+  );
+
+  /// Stops active watchers on this client and closes the bus only when owned.
+  Future<void> close() => _closing ??= _close();
+
+  Future<void> _close() async {
+    _closed = true;
+    for (final stop in List<Future<void> Function()>.of(_closeHooks)) {
+      try {
+        await stop();
+      } catch (_) {}
+    }
+    _closeHooks.clear();
+    if (_ownsBus) {
+      await _bus.close();
     }
   }
-
-  Future<void> close() => _bus.close();
 }
