@@ -21,7 +21,7 @@ Shared backend for the Remya applications on Hyprland/Linux: [Settings](https://
 | Shared | theme, accent, AI providers | `$XDG_CONFIG_HOME/remya/shared/` |
 | App | each app's registration in `remya/apps/<id>.json` | `$XDG_CONFIG_HOME/remya/<app>/settings.toml` |
 
-A system feature is written only after it is first changed or opened in Settings; installing Bar alone takes over nothing. See [XDG layout](docs/xdg-layout.md), [public API](docs/public-api.md) and [app preferences](docs/app-preferences.md).
+A system feature becomes managed after an explicit Manage call (including when its page opens in Settings), a successful Set, or a successful Resolve. Installing Bar alone takes over nothing. See [XDG layout](docs/xdg-layout.md), [public API](docs/public-api.md) and [app preferences](docs/app-preferences.md).
 
 ## Installation
 
@@ -46,8 +46,8 @@ Download the archive and `SHA256SUMS` from [GitHub Releases](https://github.com/
 
 ```bash
 sha256sum -c SHA256SUMS
-tar --zstd -xf remya_core-0.1.0-linux-x86_64.tar.zst
-cd remya_core-0.1.0-linux-x86_64
+tar --zstd -xf remya_core-0.2.0-linux-x86_64.tar.zst
+cd remya_core-0.2.0-linux-x86_64
 python tool/install.py
 ```
 
