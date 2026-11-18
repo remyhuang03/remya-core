@@ -50,19 +50,86 @@ class RemyaTheme {
     seedColor: seedFromHex(config.seedColor),
   );
 
-  ThemeData theme(Brightness brightness) => .new(
-    useMaterial3: true,
-    colorScheme: .fromSeed(
+  ThemeData theme(Brightness brightness) {
+    final colors = ColorScheme.fromSeed(
       seedColor: seedColor,
       brightness: brightness,
       dynamicSchemeVariant: styleVariant,
       contrastLevel: contrast.level,
-    ),
-    iconButtonTheme: const .new(variant: .material3Expressive),
-    fontFamilyFallback: const [
-      'Noto Sans CJK SC',
-      'Noto Sans CJK TC',
-      'sans-serif',
-    ],
-  );
+    );
+    // MD3E container & pill-item overrides until material_ui styles Menu natively.
+    const menuStyle = MenuStyle(
+      padding: WidgetStatePropertyAll(EdgeInsets.all(6)),
+      shape: WidgetStatePropertyAll(
+        RoundedRectangleBorder(borderRadius: .all(.circular(18))),
+      ),
+    );
+    return .new(
+      useMaterial3: true,
+      colorScheme: colors,
+      iconButtonTheme: const .new(variant: .material3Expressive),
+      menuTheme: const MenuThemeData(style: menuStyle),
+      menuButtonTheme: MenuButtonThemeData(
+        style: ButtonStyle(
+          shape: const WidgetStatePropertyAll(StadiumBorder()),
+          minimumSize: const WidgetStatePropertyAll(Size(64, 40)),
+          padding: const WidgetStatePropertyAll(
+            EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          ),
+          backgroundColor: .resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) return null;
+            if (states.contains(WidgetState.selected)) {
+              return colors.secondaryContainer;
+            }
+            return null;
+          }),
+          foregroundColor: .resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return colors.onSurface.withValues(alpha: .38);
+            }
+            if (states.contains(WidgetState.selected)) {
+              return colors.onSecondaryContainer;
+            }
+            return colors.onSurface;
+          }),
+          iconColor: .resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return colors.onSurface.withValues(alpha: .38);
+            }
+            if (states.contains(WidgetState.selected)) {
+              return colors.onSecondaryContainer;
+            }
+            return colors.onSurfaceVariant;
+          }),
+          overlayColor: .resolveWith((states) {
+            final base = states.contains(WidgetState.selected)
+                ? colors.onSecondaryContainer
+                : colors.onSurface;
+            if (states.contains(WidgetState.pressed) ||
+                states.contains(WidgetState.focused)) {
+              return base.withValues(alpha: .1);
+            }
+            if (states.contains(WidgetState.hovered)) {
+              return base.withValues(alpha: .08);
+            }
+            return null;
+          }),
+        ),
+      ),
+      dropdownMenuTheme: const DropdownMenuThemeData(
+        menuStyle: menuStyle,
+        inputDecorationTheme: InputDecorationThemeData(
+          isDense: true,
+          constraints: BoxConstraints.tightFor(height: 48),
+          contentPadding: .symmetric(horizontal: 14),
+          border: OutlineInputBorder(borderRadius: .all(.circular(14))),
+        ),
+      ),
+      fontFamilyFallback: const [
+        'Noto Sans CJK SC',
+        'Noto Sans CJK TC',
+        'sans-serif',
+      ],
+    );
+  }
 }

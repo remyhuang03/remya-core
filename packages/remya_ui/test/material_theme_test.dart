@@ -8,6 +8,9 @@ import 'package:remya_ui/settings_ui.dart';
 
 class _Core extends SettingsClient {
   final updates = StreamController<SettingsChange>.broadcast();
+  String mode = 'light';
+  String source = 'custom';
+  String styleVariant = 'tonal_spot';
   MaterialContrast contrast = .standard;
   bool reject = false;
   final writes = <List<String>>[];
@@ -21,19 +24,38 @@ class _Core extends SettingsClient {
     List<String> arguments = const [],
   ]) async {
     if (method == 'Set') {
-      expect(arguments.first, materialContrastSettingId);
       writes.add(arguments);
       if (reject) throw StateError('Cannot write preferences');
-      contrast = MaterialContrast.values.byName(arguments.last);
-      updates.add((topic: 'theme', value: _theme));
+      switch (arguments.first) {
+        case materialThemeModeSettingId:
+          mode = arguments.last;
+          updates.add((topic: 'theme', value: _theme));
+        case accentSourceSettingId:
+          source = arguments.last;
+          updates.add((topic: 'accent', value: _accent));
+        case materialStyleSettingId:
+          styleVariant = arguments.last;
+          updates.add((topic: 'theme', value: _theme));
+        case materialContrastSettingId:
+          contrast = MaterialContrast.values.byName(arguments.last);
+          updates.add((topic: 'theme', value: _theme));
+        default:
+          fail('Unexpected setting id: ${arguments.first}');
+      }
     }
     if (arguments.singleOrNull == 'accent') {
-      return {'source': 'custom', 'color': '#8054C9'};
+      return _accent;
     }
     return _theme;
   }
 
-  Map<String, dynamic> get _theme => ThemeConfig(contrast: contrast).toMap();
+  Map<String, dynamic> get _accent => {'source': source, 'color': '#8054C9'};
+
+  Map<String, dynamic> get _theme => ThemeConfig(
+    mode: mode,
+    styleVariant: styleVariant,
+    contrast: contrast,
+  ).toMap();
 }
 
 void main() {
@@ -61,43 +83,160 @@ void main() {
     },
   );
 
-  testWidgets('contrast shows Core readback and retains it on save failure', (
-    tester,
-  ) async {
-    final core = _Core();
-    addTearDown(core.updates.close);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: SingleChildScrollView(
-            child: RemyaMaterialThemeSettings(client: core),
+  testWidgets(
+    'theme choices render MD3E segments and menu and retain readback on failure',
+    (tester) async {
+      final core = _Core();
+      addTearDown(core.updates.close);
+      final appTheme = const RemyaTheme().theme(.light);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: appTheme,
+          home: Scaffold(
+            body: SingleChildScrollView(
+              child: RemyaMaterialThemeSettings(client: core),
+            ),
           ),
         ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    final dropdown = find.byKey(
-      const ValueKey('control-themes.material-contrast'),
-    );
-    expect(tester.widget<DropdownButton<String>>(dropdown).value, 'standard');
+      );
+      await tester.pumpAndSettle();
 
-    await tester.ensureVisible(dropdown);
-    await tester.tap(dropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Medium').last);
-    await tester.pumpAndSettle();
-    expect(core.writes.single, [materialContrastSettingId, 'medium']);
-    expect(tester.widget<DropdownButton<String>>(dropdown).value, 'medium');
+      // 2-3 item choices render as solid SettingsSegmentedButton.
+      for (final id in [
+        materialThemeModeSettingId,
+        accentSourceSettingId,
+        materialContrastSettingId,
+      ]) {
+        expect(
+          find.descendant(
+            of: find.byKey(ValueKey('control-$id')),
+            matching: find.byType(SettingsSegmentedButton<String>),
+          ),
+          findsOneWidget,
+        );
+      }
 
-    core.reject = true;
-    await tester.tap(dropdown);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('High').last);
-    await tester.pumpAndSettle();
-    expect(
-      find.textContaining('Could not save the Material theme'),
-      findsOneWidget,
-    );
-    expect(tester.widget<DropdownButton<String>>(dropdown).value, 'medium');
-  });
+      final modeControl = find.byKey(
+        const ValueKey('control-$materialThemeModeSettingId'),
+      );
+      expect(
+        tester
+            .widget<SettingsSegmentedButton<String>>(
+              find.descendant(
+                of: modeControl,
+                matching: find.byType(SettingsSegmentedButton<String>),
+              ),
+            )
+            .selected,
+        'light',
+      );
+      await tester.tap(find.text('Dark'));
+      await tester.pumpAndSettle();
+      expect(core.writes.last, [materialThemeModeSettingId, 'dark']);
+
+      await tester.tap(find.text('From background'));
+      await tester.pumpAndSettle();
+      expect(core.writes.last, [accentSourceSettingId, 'background']);
+
+      final contrastControl = find.byKey(
+        const ValueKey('control-$materialContrastSettingId'),
+      );
+      await tester.ensureVisible(contrastControl);
+      await tester.tap(find.text('Medium'));
+      await tester.pumpAndSettle();
+      expect(core.writes.last, [materialContrastSettingId, 'medium']);
+      expect(
+        tester
+            .widget<SettingsSegmentedButton<String>>(
+              find.descendant(
+                of: contrastControl,
+                matching: find.byType(SettingsSegmentedButton<String>),
+              ),
+            )
+            .selected,
+        'medium',
+      );
+
+      core.reject = true;
+      await tester.tap(find.text('High'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Could not save the Material theme'),
+        findsOneWidget,
+      );
+      expect(
+        tester
+            .widget<SettingsSegmentedButton<String>>(
+              find.descendant(
+                of: contrastControl,
+                matching: find.byType(SettingsSegmentedButton<String>),
+              ),
+            )
+            .selected,
+        'medium',
+      );
+      core.reject = false;
+
+      // Multi-option Material style variant uses SettingsDropdown (MenuAnchor)
+      // with MD3E container radius/padding and secondaryContainer selected pill.
+      final styleControl = find.byKey(
+        const ValueKey('control-$materialStyleSettingId'),
+      );
+      expect(
+        find.descendant(
+          of: styleControl,
+          matching: find.byType(SettingsDropdown<String>),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(of: styleControl, matching: find.byType(MenuAnchor)),
+        findsOneWidget,
+      );
+      expect(
+        appTheme.menuTheme.style?.shape?.resolve(const {}),
+        const RoundedRectangleBorder(borderRadius: .all(.circular(18))),
+      );
+      expect(
+        appTheme.menuTheme.style?.padding?.resolve(const {}),
+        const EdgeInsets.all(6),
+      );
+
+      await tester.ensureVisible(styleControl);
+      await tester.tap(styleControl);
+      await tester.pumpAndSettle();
+
+      final selectedItem = tester.widget<MenuItemButton>(
+        find.ancestor(
+          of: find.text('Tonal spot').last,
+          matching: find.byType(MenuItemButton),
+        ),
+      );
+      expect(
+        selectedItem.statesController?.value,
+        contains(WidgetState.selected),
+      );
+      expect(
+        appTheme.menuButtonTheme.style?.backgroundColor?.resolve({
+          WidgetState.selected,
+        }),
+        appTheme.colorScheme.secondaryContainer,
+      );
+
+      await tester.tap(find.text('Expressive').last);
+      await tester.pumpAndSettle();
+      expect(core.writes.last, [materialStyleSettingId, 'expressive']);
+      expect(
+        tester
+            .widget<SettingsDropdown<String>>(
+              find.descendant(
+                of: styleControl,
+                matching: find.byType(SettingsDropdown<String>),
+              ),
+            )
+            .selected,
+        'expressive',
+      );
+    },
+  );
 }

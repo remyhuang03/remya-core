@@ -5,6 +5,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:remya_client/settings_contract.dart';
 
 import '../theme.dart';
+import 'choices.dart';
 import 'navigation.dart';
 import 'scaffold.dart';
 import 'surfaces.dart';
@@ -149,39 +150,14 @@ class _RemyaMaterialThemeSettingsState
   ) => SettingRow(
     id: id,
     label: SettingLabel(label),
-    control: SizedBox(
-      width: 200,
-      child: Semantics(
-        label: label,
-        child: InputDecorator(
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: .all(.circular(14))),
-          ),
-          child: DropdownButtonHideUnderline(
-            child: DropdownButton<String>(
-              key: ValueKey('control-$id'),
-              value: value,
-              isExpanded: true,
-              isDense: true,
-              items: [
-                for (final option in choices.entries)
-                  DropdownMenuItem(
-                    value: option.key,
-                    child: Text(option.value),
-                  ),
-              ],
-              onChanged: _saving || _loadError != null
-                  ? null
-                  : (selected) {
-                      if (selected != null && selected != value) {
-                        unawaited(_save(id, selected));
-                      }
-                    },
-            ),
-          ),
-        ),
-      ),
+    control: SettingsChoice<String>(
+      key: ValueKey('control-$id'),
+      label: label,
+      selected: value,
+      choices: choices,
+      onSelected: _saving || _loadError != null
+          ? null
+          : (selected) => unawaited(_save(id, selected)),
     ),
   );
 
