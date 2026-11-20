@@ -115,7 +115,7 @@
     <!-- Get account-information reads the service username and shared Remya avatar.
          The username readout rejects Set; Set your-info.58484bbb accepts an image path
          and normalized crop rectangle. Changed account-information reports avatar updates. -->
-    <!-- Get google-account returns {configured,pending,email,calendar,tasks,error}.
+    <!-- Get google-account returns {configured,pending,email,accountId,calendar,tasks,error}.
          Set google-account.connect accepts {calendar?:bool,tasks?:bool} and starts
          desktop authorization. Set google-account.disconnect takes {} and revokes.
          Changed google-account is an empty invalidation. Tokens stay in Core. -->
@@ -125,6 +125,13 @@
     <method name="Get">
       <arg type="s" direction="in"/>
       <arg type="s" direction="out"/>
+    </method>
+    <!-- GoogleTasks uses an account-bound allowlist of Tasks v1 requests.
+         The JSON envelope is {accountId,operation,args?}; see docs/public-api.md.
+         Tokens and task data are never broadcast as Changed signals. -->
+    <method name="GoogleTasks">
+      <arg type="s" name="request" direction="in"/>
+      <arg type="s" name="result" direction="out"/>
     </method>
     <!-- Manage opts a feature into persistence and returns its Get payload.
          Unknown features fail with InvalidArgument. Get/Reload never opt in. -->

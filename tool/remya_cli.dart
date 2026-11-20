@@ -11,6 +11,7 @@ const usage = '''Usage: remya <command> [arguments]
   get google-account                   Read the shared Google account status
   set google-account.connect <json>    Start sign-in with optional calendar and tasks boolean flags
   set google-account.disconnect '{}'  Revoke the shared Google connection
+  google-tasks <json|->               Run an account-bound Google Tasks operation; - reads JSON from stdin
   replace <setting-id> <json|-> <revision>  Save an app preference if unchanged
   open-app <app> [page]              Open registered application settings
   install-appimage <path>            Install an AppImage and show its progress in Settings
@@ -82,6 +83,7 @@ Future<void> main(List<String> arguments) async {
     }
     const methods = {
       'get': 'Get',
+      'google-tasks': 'GoogleTasks',
       'manage': 'Manage',
       'set': 'Set',
       'replace': 'Replace',
@@ -98,7 +100,9 @@ Future<void> main(List<String> arguments) async {
     final method = methods[command];
     if (method == null) throw ArgumentError('Unknown command: $command');
     // Passwords stay out of the process list by arriving on stdin.
-    final values = command == 'open' && args.isEmpty
+    final values = command == 'google-tasks' && args.singleOrNull == '-'
+        ? [(await utf8.decoder.bind(stdin).join()).trim()]
+        : command == 'open' && args.isEmpty
         ? ['home']
         : command == 'open-app' && args.length == 1
         ? [args[0], '']

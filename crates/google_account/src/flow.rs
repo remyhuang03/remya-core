@@ -13,16 +13,16 @@ use std::{
 };
 
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
-const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+pub(super) const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const JWKS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const CALENDAR: &str = "https://www.googleapis.com/auth/calendar.events";
-const TASKS: &str = "https://www.googleapis.com/auth/tasks";
+pub(super) const TASKS: &str = "https://www.googleapis.com/auth/tasks";
 
 #[derive(Clone, Deserialize)]
 pub(super) struct Credentials {
     pub(super) client_id: String,
-    client_secret: String,
+    pub(super) client_secret: String,
 }
 
 impl Credentials {
@@ -64,11 +64,12 @@ fn random() -> Result<String, String> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-fn google_https() -> ureq::Agent {
+pub(super) fn google_https(http_status_as_error: bool) -> ureq::Agent {
     ureq::Agent::config_builder()
         .https_only(true)
         .max_redirects(0)
         .timeout_global(Some(Duration::from_secs(8)))
+        .http_status_as_error(http_status_as_error)
         .build()
         .into()
 }
@@ -135,7 +136,7 @@ pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<
 
     let (code, mut browser) = wait_for_callback(listener, &address, &state)?;
     let result = (|| {
-        let agent = google_https();
+        let agent = google_https(true);
         let response = agent
             .post(TOKEN_URL)
             .send_form([
@@ -377,7 +378,7 @@ pub(super) fn revoke(token: &str) -> Result<(), String> {
     struct RevokeError {
         error: String,
     }
-    let agent = google_https();
+    let agent = google_https(true);
     if let Ok(mut response) = agent
         .post(REVOKE_URL)
         .config()

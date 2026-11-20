@@ -101,6 +101,7 @@ impl Requests {
             });
         }
         match method {
+            "GoogleTasks" => Some(self.google_account.tasks_request(key)),
             "OpenApp" => Some(self.apps.lock().unwrap().open(key, &args[1])),
             "Get" if ai::Ai::is_get(key) => Some(self.ai.get(key)),
             "Set" if ai::SET_IDS.contains(&key) => Some(self.ai.set(key, &args[1])),

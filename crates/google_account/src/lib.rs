@@ -1,6 +1,7 @@
 //! Core's shared Google identity and OAuth grant for desktop applications.
 mod flow;
 mod keyring;
+mod tasks;
 
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use flow::Credentials;
@@ -47,6 +48,8 @@ pub struct Status {
     configured: bool,
     pending: bool,
     email: Option<String>,
+    #[serde(rename = "accountId")]
+    account_id: Option<String>,
     #[serde(flatten)]
     capabilities: Capabilities,
     error: Option<String>,
@@ -62,6 +65,8 @@ pub struct Account {
     config: PathBuf,
     keyring: Keyring,
     state: Mutex<State>,
+    tasks: Mutex<Option<tasks::AccessToken>>,
+    tasks_agent: ureq::Agent,
     notifier: Mutex<Option<Sender<()>>>,
 }
 
@@ -73,6 +78,8 @@ impl Account {
             config,
             keyring: Keyring::new(namespace),
             state: Mutex::default(),
+            tasks: Mutex::default(),
+            tasks_agent: flow::google_https(false),
             notifier: Mutex::default(),
         }
     }
@@ -100,15 +107,21 @@ impl Account {
             ),
             _ => None,
         };
-        let (email, capabilities, keyring_error) = match grant {
-            Ok(Some(grant)) => (Some(grant.email), grant.capabilities, None),
-            Ok(None) => (None, Capabilities::default(), None),
-            Err(error) => (None, Capabilities::default(), Some(error)),
+        let (email, account_id, capabilities, keyring_error) = match grant {
+            Ok(Some(grant)) => (
+                Some(grant.email),
+                Some(grant.subject),
+                grant.capabilities,
+                None,
+            ),
+            Ok(None) => (None, None, Capabilities::default(), None),
+            Err(error) => (None, None, Capabilities::default(), Some(error)),
         };
         Status {
             configured,
             pending: state.pending,
             email,
+            account_id,
             capabilities,
             error: config_error
                 .or_else(|| state.error.clone())
@@ -157,6 +170,7 @@ impl Account {
             .name("google-oauth".into())
             .spawn(move || {
                 let result = flow::authorize(client_for_worker, requested);
+                let mut tasks = account.tasks.lock().unwrap();
                 let mut state = account.state.lock().unwrap();
                 state.error = match result.and_then(|grant| {
                     if let Some((subject, capabilities)) = old_identity {
@@ -168,6 +182,7 @@ impl Account {
                         }
                     }
                     account.keyring.store(&grant)?;
+                    *tasks = None;
                     Ok(grant)
                 }) {
                     Ok(grant) => (!grant.capabilities.includes(requested))
@@ -185,6 +200,7 @@ impl Account {
     }
 
     pub fn disconnect(&self) -> Result<Status, String> {
+        let mut tasks = self.tasks.try_lock().map_err(|_| tasks::BUSY.to_string())?;
         let mut state = self.state.lock().unwrap();
         if state.pending {
             return Err("Wait for Google authorization to finish before disconnecting.".into());
@@ -193,6 +209,7 @@ impl Account {
             if let Some(grant) = self.keyring.load()? {
                 flow::revoke(&grant.refresh_token)?;
                 self.keyring.clear()?;
+                *tasks = None;
             }
             Ok(())
         })();
@@ -203,5 +220,30 @@ impl Account {
         }
         self.notify();
         result.map(|_| Self::snapshot(&state, Credentials::load(&self.config), Ok(None)))
+    }
+    pub fn tasks_request(&self, raw: &str) -> Result<serde_json::Value, String> {
+        let call = tasks::Call::parse(raw).map_err(|error| error.to_string())?;
+        let account_id = call.account_id.clone();
+        let request = call.prepare().map_err(|error| error.to_string())?;
+        let mut tasks = self.tasks.try_lock().map_err(|_| tasks::BUSY.to_string())?;
+        let Some(client) =
+            Credentials::load(&self.config).map_err(|error| format!("Unavailable:{error}"))?
+        else {
+            return Err("Unavailable:Google OAuth client credentials are missing.".into());
+        };
+        let Some(grant) = self
+            .keyring
+            .load()
+            .map_err(|error| format!("Unavailable:{error}"))?
+            .filter(|grant| {
+                grant.client_id == client.client_id
+                    && grant.subject == account_id
+                    && grant.capabilities.tasks
+            })
+        else {
+            return Err(tasks::AUTH.to_string());
+        };
+        tasks::execute(&self.tasks_agent, &mut tasks, &client, &grant, &request)
+            .map_err(|error| error.to_string())
     }
 }

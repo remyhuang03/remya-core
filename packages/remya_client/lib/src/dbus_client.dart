@@ -12,6 +12,7 @@ const settingsObjectPath = '/top/remya/Core1';
 /// Method arity is shared by CLI validation, clients, and server introspection.
 const settingsMethods = {
   'Get': 1,
+  'GoogleTasks': 1,
   'Manage': 1,
   'Set': 2,
   'Replace': 3,

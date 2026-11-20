@@ -3,8 +3,9 @@
 Remya Core owns one Google connection per desktop user's Core configuration.
 Clients can connect with identity alone or authorize the Calendar and Tasks
 read/write capabilities. The same shared identity is available from every
-Remya application. Bar requests identity only. The Calendar and Tasks
-capabilities are available for integration development.
+Remya application. The Bar Account page requests identity only. The Bar Tasks
+connection requests Tasks read/write access; Calendar authorization remains
+available for integration development.
 
 ## Desktop configuration
 
@@ -47,7 +48,11 @@ If Google withholds a requested capability during first connection, Core
 records the partial grant and reports the missing consent. If reauthorization
 would remove a prior capability or switch identities, Core keeps the existing
 grant and reports the issue. The status reports the last successful grant.
-Remote token usability is checked when a future feature uses the grant.
+Core refreshes a short-lived access token when the Tasks API needs one. The
+Google subject is exposed as an opaque account identifier for cache isolation.
+Remote authorization failures tell the caller to reconnect the existing
+account. Core holds the access token in memory and clears it when a grant is
+replaced or disconnected.
 
 Disconnect revokes the Google grant and removes the local Secret Service
 entry. Google revocation affects the account's whole Remya Apps project.
@@ -62,9 +67,8 @@ sensitive. The production sign-in requests `openid email`. The consent screen
 uses verified branding, with a public homepage, privacy policy and terms on
 the verified domain. Production use of Calendar and Tasks requires scope
 approval.
-A production scope submission should demonstrate the implemented features
-using those scopes and explain the user benefit. This OAuth-only foundation
-does not provide that demonstration.
+A production scope submission should demonstrate the implemented Tasks
+features and explain the user benefit.
 
 References:
 

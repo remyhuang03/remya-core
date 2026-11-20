@@ -22,7 +22,20 @@ fn signal(bus: &gio::DBusConnection, topic: &str, value: &serde_json::Value) {
 fn return_error(invocation: gio::DBusMethodInvocation, error: &str) {
     let (kind, message) = error
         .split_once(':')
-        .filter(|(k, _)| ["InvalidArgument", "Unavailable"].contains(k))
+        .filter(|(k, _)| {
+            [
+                "InvalidArgument",
+                "Unavailable",
+                "OperationFailed",
+                "TasksAuth",
+                "TasksOffline",
+                "TasksRetry",
+                "TasksMissing",
+                "TasksDenied",
+                "TasksAmbiguous",
+            ]
+            .contains(k)
+        })
         .unwrap_or(("OperationFailed", error));
     invocation.return_dbus_error(&format!("{INTERFACE}.{kind}"), message);
 }

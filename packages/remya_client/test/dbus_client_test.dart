@@ -174,6 +174,7 @@ void main() {
 
         final invocations = <(String, List<String>)>[
           ('Get', ['theme']),
+          ('GoogleTasks', ['{}']),
           ('Manage', ['display']),
           ('Set', ['themes.material-theme-mode', 'dark']),
           ('Replace', ['remya-bar.pos', '"top"', 'rev1']),
@@ -212,6 +213,35 @@ void main() {
           'method': 'Manage',
           'args': ['input'],
         });
+      },
+    );
+
+    test(
+      'Google Tasks keeps account identity and ambiguous writes explicit',
+      () async {
+        final bus = _FakeDBusClient();
+        final client = SettingsClient(bus: bus);
+        bus.onCallMethod = (record) async {
+          expect(record.name, 'GoogleTasks');
+          final request = jsonDecode(record.values.single.asString()) as Map;
+          expect(request['accountId'], '123456');
+          throw DBusMethodResponseException(
+            DBusMethodErrorResponse('org.freedesktop.DBus.Error.NoReply'),
+          );
+        };
+        for (final (operation, code) in [
+          ('lists.list', 'retry'),
+          ('tasks.insert', 'ambiguous'),
+          ('tasks.move', 'ambiguous'),
+          ('tasks.clear', 'ambiguous'),
+        ]) {
+          await expectLater(
+            client.googleTasksRequest('123456', operation),
+            throwsA(
+              isA<GoogleTasksException>().having((e) => e.code, 'code', code),
+            ),
+          );
+        }
       },
     );
 

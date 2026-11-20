@@ -1469,9 +1469,10 @@ CLI examples: `remya get ai.providers`,
 
 [Desktop setup, OAuth scopes and publishing](google-account.md)
 
-`Get google-account` returns `{configured, pending, email, calendar, tasks,
-error}`. The four status/permission flags are booleans. `email` and `error`
-are strings or null. The flags describe the last successful local grant,
+`Get google-account` returns `{configured, pending, email, accountId, calendar,
+tasks, error}`. The four status/permission flags are booleans. `email`,
+`accountId` and `error` are strings or null. `accountId` identifies the Google
+subject independently of its email address. The flags describe the last successful local grant,
 including when another browser authorization is pending.
 
 `Set google-account.connect '{"calendar":true,"tasks":true}'` starts a browser
@@ -1484,3 +1485,44 @@ new status. Both reject requests while browser authorization is pending.
 Re-read with `Get`. The same operations are available as `remya get` and
 `remya set`, and through `GoogleAccountClient` on the public Dart
 `SettingsClient`. Tokens are never returned to callers.
+
+### Google Tasks
+
+`GoogleTasks(request)` accepts a JSON object `{accountId, operation, args?}`.
+Supply the current `accountId` from `Get google-account`. Core requires an
+existing Tasks read/write grant and rejects requests for any other account.
+The CLI equivalent is `remya google-tasks <json|->`; `-` reads JSON from stdin.
+The Dart equivalent is `SettingsClient.googleTasksRequest`. Every caller gets
+the same validation and bounded, fixed-endpoint HTTPS transport. No task payload
+is broadcast in a `Changed` signal.
+
+| Operation | Arguments |
+| --- | --- |
+| `lists.list` | `pageToken?` |
+| `lists.get`, `lists.delete` | `listId` |
+| `lists.insert` | `body: {title}` |
+| `lists.patch` | `listId, body: {title}` |
+| `tasks.list` | `listId, pageToken?, updatedMin?, showCompleted?, showHidden?, showDeleted?, showAssigned?` |
+| `tasks.get`, `tasks.delete` | `listId, taskId` |
+| `tasks.insert` | `listId, parent?, previous?, body: {title, notes?, status?, due?}` |
+| `tasks.patch` | `listId, taskId, body: {title?, notes?, status?, due?}` |
+| `tasks.move` | `listId, taskId, parent?, previous?, destinationTasklist?` |
+| `tasks.clear` | `listId` |
+
+Lists and tasks return one Google response page, with page sizes of 1,000 and
+100 respectively. Continue with `nextPageToken` until absent. The four
+`show*` flags default to true so that clients can filter locally.
+`updatedMin` is an RFC 3339 timestamp. `lists.get` accepts `@default` to
+resolve the account's default list. A due date is a calendar date. Core
+accepts `YYYY-MM-DD` or RFC 3339 and sends midnight UTC on the supplied
+calendar day. Use `null` to clear it. Status is `needsAction` or `completed`.
+Only the provided writable fields are patched. Delete and clear return `{}`.
+
+D-Bus errors in the `top.remya.Core1` namespace identify the recovery path:
+`TasksAuth` for an invalid grant or account mismatch, `TasksOffline` for a
+network failure, `TasksRetry` for a transient error, `TasksMissing` for a
+removed resource, `TasksDenied` for a rejected operation, `TasksAmbiguous`
+when a create, move, or clear may have succeeded, `InvalidArgument` for malformed requests,
+and `Unavailable` for missing local or Cloud configuration. Check the task list before retrying an ambiguous operation. Core never
+automatically retries a create, move, or clear. A caller comparing edits to a
+remote version must re-read and compare the affected fields itself.

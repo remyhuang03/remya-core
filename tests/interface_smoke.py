@@ -463,7 +463,7 @@ def theme_session():
 
 def google_account_checks():
     account = {
-        'configured': False, 'pending': False, 'email': None,
+        'configured': False, 'pending': False, 'email': None, 'accountId': None,
         'calendar': False, 'tasks': False, 'error': None,
     }
     assert account == cli('get', 'google-account') == dbus('Get', 'google-account')
@@ -482,7 +482,22 @@ def google_account_checks():
             assert rejected.returncode != 0
         else:
             raise AssertionError((setting, payload, 'D-Bus unexpectedly accepted the request'))
-    print('PASS: Google account status and input validation via CLI and D-Bus', flush=True)
+    for payload, expected in [
+        ({"accountId": "123", "operation": "lists.list"}, "Unavailable"),
+        ({"accountId": "123", "operation": "tasks.get",
+          "args": {"listId": "list", "taskId": "../../other"}}, "InvalidArgument"),
+        ({"accountId": "123", "operation": "lists.list",
+          "args": {"url": "https://example.com"}}, "InvalidArgument"),
+    ]:
+        request = json.dumps(payload)
+        assert expected in cli('google-tasks', request, ok=False)
+        try:
+            dbus('GoogleTasks', json.dumps(request))
+        except subprocess.CalledProcessError as rejected:
+            assert rejected.returncode != 0
+        else:
+            raise AssertionError((payload, 'D-Bus unexpectedly accepted the request'))
+    print('PASS: Google account and Tasks input validation via CLI and D-Bus', flush=True)
 
 
 def session_checks():
