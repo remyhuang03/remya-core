@@ -15,6 +15,7 @@ class GoogleAccountStatus {
     this.accountId,
     required this.calendar,
     required this.tasks,
+    this.avatarSync = false,
     required this.error,
   });
 
@@ -26,6 +27,7 @@ class GoogleAccountStatus {
         accountId: json['accountId'] as String?,
         calendar: json['calendar'] as bool,
         tasks: json['tasks'] as bool,
+        avatarSync: json['avatarSync'] as bool? ?? false,
         error: json['error'] as String?,
       );
 
@@ -35,6 +37,7 @@ class GoogleAccountStatus {
   final String? accountId;
   final bool calendar;
   final bool tasks;
+  final bool avatarSync;
   final String? error;
 }
 
@@ -62,6 +65,15 @@ extension GoogleAccountClient on SettingsClient {
       jsonEncode({'calendar': calendar, 'tasks': tasks}),
     ]),
   );
+
+  /// Enables shared avatar sync, requesting Google profile access if needed.
+  Future<GoogleAccountStatus> setGoogleAvatarSync(bool enabled) async =>
+      GoogleAccountStatus.fromJson(
+        await call('Set', [
+          '$googleAccountTopic.avatar-sync',
+          jsonEncode(enabled),
+        ]),
+      );
 
   Future<GoogleAccountStatus> disconnectGoogleAccount() async =>
       GoogleAccountStatus.fromJson(

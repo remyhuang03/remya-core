@@ -85,6 +85,7 @@ class _RemyaAvatarEditorState extends State<RemyaAvatarEditor> {
     listenable: _controller,
     builder: (context, _) {
       final path = _controller.value['avatar_path'] as String?;
+      final syncing = _controller.value['google_avatar_sync'] == true;
       return Column(
         crossAxisAlignment: .stretch,
         children: [
@@ -94,6 +95,8 @@ class _RemyaAvatarEditorState extends State<RemyaAvatarEditor> {
               message: error,
               onRetry: _controller.isBusy ? null : _controller.reload,
             ),
+          if (_controller.value['google_avatar_error'] case final String error)
+            SettingsErrorCard(message: error, actionLabel: null),
           SettingsSurface(
             child: Column(
               children: [
@@ -104,7 +107,9 @@ class _RemyaAvatarEditorState extends State<RemyaAvatarEditor> {
                 const SizedBox(height: 16),
                 FilledButton.icon(
                   key: const ValueKey(accountAvatarSettingId),
-                  onPressed: _choosing || _controller.isBusy ? null : _choose,
+                  onPressed: _choosing || _controller.isBusy || syncing
+                      ? null
+                      : _choose,
                   icon: const Icon(Icons.add_photo_alternate_outlined),
                   label: const Text('Change avatar'),
                 ),

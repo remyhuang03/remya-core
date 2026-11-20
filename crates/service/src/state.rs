@@ -782,8 +782,10 @@ impl State {
                     _ if applications::external_tools::IDS.contains(&key) => {
                         applications::external_tools::read_setting(key)
                     }
-                    "account-information" => self.account.read(),
-                    _ if account::IDS.contains(&key) => self.account.read_setting(key),
+                    "account-information" => self.account_information(),
+                    _ if account::IDS.contains(&key) => self
+                        .account_information()
+                        .map(|state| AccountInformation::setting(key, state)),
                     "storage" | "cleanup" => Ok(self.storage.read(key)),
                     "printers" => Ok(self.printers.state()),
                     _ if printers::IDS.contains(&key) => Ok(self.printers.setting_value(key)),
@@ -1010,6 +1012,17 @@ impl State {
         }
     }
 
+    pub fn account_information(&self) -> Result<Value, String> {
+        let google = self.requests.google_account.avatar();
+        let mut value = match google.path.as_deref().filter(|path| path.is_file()) {
+            Some(path) => self.account.read_using(path)?,
+            None => self.account.read()?,
+        };
+        value["google_avatar_sync"] = google.enabled.into();
+        value["google_avatar_error"] = google.error.into();
+        Ok(value)
+    }
+
     fn set(&mut self, key: &str, value: &str) -> Result<Value, String> {
         if key == remya_power::idle::START_ID {
             if value != "start" {
@@ -1045,7 +1058,8 @@ impl State {
             return self.execute("Open", &[page.into()]);
         }
         if account::IDS.contains(&key) {
-            return self.account.set(key, value, atomic_write);
+            self.account.set(key, value, atomic_write)?;
+            return self.account_information();
         }
         if [
             remya_network::airplane::ENABLED,

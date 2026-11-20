@@ -40,7 +40,7 @@ pub(super) const BUSY: Failure =
     Failure("TasksRetry", "Another Google Tasks request is in progress.");
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(super) struct Failure(pub(super) &'static str, pub(super) &'static str);
+pub(super) struct Failure(&'static str, &'static str);
 
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -479,15 +479,16 @@ fn permission(value: &Value) -> Failure {
 
 pub(super) struct AccessToken {
     fingerprint: [u8; 32],
-    value: String,
+    pub(super) value: String,
     expires: Instant,
 }
 
-fn refresh(
+pub(super) fn refresh(
     agent: &Agent,
     client: &Credentials,
     grant: &Grant,
     fingerprint: [u8; 32],
+    required_scope: fn(&str) -> bool,
 ) -> Result<AccessToken, Failure> {
     #[derive(Deserialize)]
     struct Token {
@@ -507,7 +508,7 @@ fn refresh(
         ])
         .map_err(|error| {
             eprintln!(
-                "google_account tasks token refresh transport failed: {}",
+                "google_account token refresh transport failed: {}",
                 describe_transport_error(&error)
             );
             OFFLINE
@@ -516,7 +517,7 @@ fn refresh(
     let reader = response.body_mut().with_config().limit(64 * 1024).reader();
     if code == 400 || code == 401 {
         let error = serde_json::from_reader::<_, Value>(reader).unwrap_or(Value::Null);
-        eprintln!("google_account tasks token refresh http {code}");
+        eprintln!("google_account token refresh http {code}");
         return Err(match error["error"].as_str() {
             Some("invalid_grant" | "invalid_scope" | "unauthorized_client" | "invalid_client") => {
                 AUTH
@@ -525,11 +526,11 @@ fn refresh(
         });
     }
     if code == 429 || code >= 500 {
-        eprintln!("google_account tasks token refresh http {code}");
+        eprintln!("google_account token refresh http {code}");
         return Err(RETRY);
     }
     if code != 200 {
-        eprintln!("google_account tasks token refresh http {code}");
+        eprintln!("google_account token refresh http {code}");
         return Err(ERROR);
     }
     let token: Token = serde_json::from_reader(reader).map_err(|_| ERROR)?;
@@ -540,10 +541,7 @@ fn refresh(
     {
         return Err(ERROR);
     }
-    if token
-        .scope
-        .is_some_and(|scope| !scope.split_ascii_whitespace().any(|s| s == TASKS))
-    {
+    if token.scope.is_some_and(|scope| !required_scope(&scope)) {
         return Err(AUTH);
     }
     Ok(AccessToken {
@@ -568,7 +566,9 @@ pub(super) fn execute(
         .is_some_and(|token| token.fingerprint == fingerprint && token.expires > Instant::now());
     if !cached {
         *cache = None;
-        *cache = Some(refresh(fresh, client, grant, fingerprint)?);
+        *cache = Some(refresh(fresh, client, grant, fingerprint, |scope| {
+            scope.split_ascii_whitespace().any(|s| s == TASKS)
+        })?);
     }
     let result = request.send(pooled, fresh, &cache.as_ref().unwrap().value);
     // Authentication failure from a cached token invalidates it before the next request.

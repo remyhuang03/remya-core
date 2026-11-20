@@ -115,9 +115,11 @@
     <!-- Get account-information reads the service username and shared Remya avatar.
          The username readout rejects Set; Set your-info.58484bbb accepts an image path
          and normalized crop rectangle. Changed account-information reports avatar updates. -->
-    <!-- Get google-account returns {configured,pending,email,accountId,calendar,tasks,error}.
-         Set google-account.connect accepts {calendar?:bool,tasks?:bool} and starts
+    <!-- Get google-account returns {configured,pending,email,accountId,calendar,tasks,profile,avatarSync,error}.
+         Set google-account.connect accepts {calendar?:bool,tasks?:bool,profile?:bool} and starts
          desktop authorization. Set google-account.disconnect takes {} and revokes.
+         Set google-account.avatar-sync takes a boolean and returns Google account status.
+         The effective avatar and sync errors are reported in account-information.
          Changed google-account is an empty invalidation. Tokens stay in Core. -->
     <!-- System updates is paused work in progress. Get updates / updates.* remains inspectable.
          All eight update Set IDs reject Unavailable; production automatic ticks never run,

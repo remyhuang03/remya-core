@@ -9,7 +9,8 @@ const usage = '''Usage: remya <command> [arguments]
   manage <feature>                   Start managing the current system snapshot
   set <setting-id> <value|->           Apply an available setting; - reads the value from stdin
   get google-account                   Read the shared Google account status
-  set google-account.connect <json>    Start sign-in with optional calendar and tasks boolean flags
+  set google-account.connect <json>    Start sign-in with optional calendar, tasks and profile flags
+  set google-account.avatar-sync <true|false>  Set Google profile picture sync
   set google-account.disconnect '{}'  Revoke the shared Google connection
   google-tasks <json|->               Run an account-bound Google Tasks operation; - reads JSON from stdin
   replace <setting-id> <json|-> <revision>  Save an app preference if unchanged

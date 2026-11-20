@@ -44,17 +44,21 @@ impl AccountInformation {
     }
 
     pub fn read(&self) -> Result<Value, String> {
+        self.read_using(&self.avatar)
+    }
+
+    pub fn read_using(&self, avatar_path: &Path) -> Result<Value, String> {
         let username = gio::glib::user_name()
             .into_string()
             .map_err(|_| "Username is not valid UTF-8")?;
-        let avatar = match fs::metadata(&self.avatar) {
+        let avatar = match fs::metadata(avatar_path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e.to_string()),
             Ok(metadata) => {
                 if !metadata.is_file() || metadata.len() > MAX_BYTES {
                     Err("Saved avatar is not a regular image".into())
                 } else {
-                    Pixbuf::file_info(&self.avatar)
+                    Pixbuf::file_info(avatar_path)
                         .filter(|(format, width, height)| {
                             format.name().as_deref() == Some("png")
                                 && *width == AVATAR_SIZE
@@ -71,7 +75,7 @@ impl AccountInformation {
             }
         };
         let (path, revision, error) = match avatar {
-            Ok(Some(revision)) => (Some(&self.avatar), Some(revision), None),
+            Ok(Some(revision)) => (Some(avatar_path), Some(revision), None),
             Ok(None) => (None, None, None),
             Err(error) => (None, None, Some(error)),
         };
@@ -80,13 +84,12 @@ impl AccountInformation {
         )
     }
 
-    pub fn read_setting(&self, id: &str) -> Result<Value, String> {
-        let state = self.read()?;
+    pub fn setting(id: &str, state: Value) -> Value {
         let value = match id {
             USERNAME => &state["username"],
             _ => &state["avatar_path"],
         };
-        Ok(json!({"id": id, "availability": "available", "value": value, "state": state}))
+        json!({"id": id, "availability": "available", "value": value, "state": state})
     }
 
     pub fn set(
@@ -125,40 +128,7 @@ impl AccountInformation {
         if bytes.len() as u64 > MAX_BYTES {
             return Err(invalid("Choose an image no larger than 32 MiB"));
         }
-        let supported = bytes.starts_with(b"\x89PNG\r\n\x1a\n")
-            || bytes.starts_with(b"\xff\xd8\xff")
-            || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"));
-        if !supported {
-            return Err(invalid("Choose a PNG, JPEG or WebP image"));
-        }
-        let loader = PixbufLoader::new();
-        let oversized = Rc::new(Cell::new(false));
-        let limit = oversized.clone();
-        loader.connect_size_prepared(move |loader, width, height| {
-            if width <= 0
-                || height <= 0
-                || width > 16384
-                || height > 16384
-                || i64::from(width) * i64::from(height) > MAX_PIXELS
-            {
-                limit.set(true);
-                loader.set_size(1, 1);
-            }
-        });
-        let decoded = loader.write(&bytes);
-        let closed = loader.close();
-        decoded
-            .and(closed)
-            .map_err(|e| invalid(&format!("Cannot decode image: {e}")))?;
-        if oversized.get() {
-            return Err(invalid(
-                "Choose an image up to 64 megapixels and 16,384 pixels per side",
-            ));
-        }
-        let image = loader
-            .pixbuf()
-            .and_then(|p| p.apply_embedded_orientation())
-            .ok_or_else(|| invalid("Cannot decode image"))?;
+        let image = decode_image(&bytes)?;
         let left = (crop.left * f64::from(image.width())).round() as i32;
         let top = (crop.top * f64::from(image.height())).round() as i32;
         let right = (crop.right * f64::from(image.width())).round() as i32;
@@ -166,12 +136,7 @@ impl AccountInformation {
         if left >= right || top >= bottom {
             return Err(invalid("The crop rectangle is empty"));
         }
-        let avatar = image
-            .new_subpixbuf(left, top, right - left, bottom - top)
-            .scale_simple(AVATAR_SIZE, AVATAR_SIZE, InterpType::Bilinear)
-            .ok_or("Cannot resize avatar")?
-            .save_to_bufferv("png", &[])
-            .map_err(|e| e.to_string())?;
+        let avatar = encode_avatar(&image.new_subpixbuf(left, top, right - left, bottom - top))?;
         if self.avatar.is_symlink() {
             return Err("Avatar path is a symbolic link; it was not overwritten".into());
         }
@@ -180,12 +145,84 @@ impl AccountInformation {
     }
 }
 
+fn decode_image(bytes: &[u8]) -> Result<Pixbuf, String> {
+    let supported = bytes.starts_with(b"\x89PNG\r\n\x1a\n")
+        || bytes.starts_with(b"\xff\xd8\xff")
+        || (bytes.starts_with(b"RIFF") && bytes.get(8..12) == Some(b"WEBP"));
+    if !supported {
+        return Err(invalid("Choose a PNG, JPEG or WebP image"));
+    }
+    let loader = PixbufLoader::new();
+    let oversized = Rc::new(Cell::new(false));
+    let limit = oversized.clone();
+    loader.connect_size_prepared(move |loader, width, height| {
+        if width <= 0
+            || height <= 0
+            || width > 16384
+            || height > 16384
+            || i64::from(width) * i64::from(height) > MAX_PIXELS
+        {
+            limit.set(true);
+            loader.set_size(1, 1);
+        }
+    });
+    let decoded = loader.write(bytes);
+    let closed = loader.close();
+    decoded
+        .and(closed)
+        .map_err(|e| invalid(&format!("Cannot decode image: {e}")))?;
+    if oversized.get() {
+        return Err(invalid(
+            "Choose an image up to 64 megapixels and 16,384 pixels per side",
+        ));
+    }
+    loader
+        .pixbuf()
+        .and_then(|p| p.apply_embedded_orientation())
+        .ok_or_else(|| invalid("Cannot decode image"))
+}
+
+fn encode_avatar(image: &Pixbuf) -> Result<Vec<u8>, String> {
+    image
+        .scale_simple(AVATAR_SIZE, AVATAR_SIZE, InterpType::Bilinear)
+        .ok_or("Cannot resize avatar")?
+        .save_to_bufferv("png", &[])
+        .map_err(|e| e.to_string())
+}
+
+pub fn normalize_avatar(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let image = decode_image(bytes)?;
+    let size = image.width().min(image.height());
+    encode_avatar(&image.new_subpixbuf(
+        (image.width() - size) / 2,
+        (image.height() - size) / 2,
+        size,
+        size,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     fn write(path: &Path, bytes: &[u8]) -> Result<(), String> {
         fs::write(path, bytes).map_err(|e| e.to_string())
     }
+    #[test]
+    fn normalizes_a_downloaded_avatar_with_a_center_crop() {
+        let pixels = Pixbuf::new(gdk_pixbuf::Colorspace::Rgb, false, 8, 6, 2).unwrap();
+        pixels.fill(0xff0000ff);
+        pixels.new_subpixbuf(2, 0, 2, 2).fill(0x0000ffff);
+        let input = pixels.save_to_bufferv("png", &[]).unwrap();
+        let png = normalize_avatar(&input).unwrap();
+        let output = decode_image(&png).unwrap();
+        assert_eq!(
+            (output.width(), output.height()),
+            (AVATAR_SIZE, AVATAR_SIZE)
+        );
+        assert_eq!(&output.read_pixel_bytes()[..3], &[0, 0, 255]);
+        assert!(normalize_avatar(b"invalid image").is_err());
+    }
+
     #[test]
     fn crops_and_saves_a_real_avatar_and_retains_it_after_rejected_writes() {
         let root = tempfile::tempdir().unwrap();

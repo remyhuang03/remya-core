@@ -14,10 +14,11 @@ use std::{
 
 pub const GOOGLE_ACCOUNT: &str = "google-account";
 const GOOGLE_CONNECT: &str = "google-account.connect";
+const GOOGLE_AVATAR_SYNC: &str = "google-account.avatar-sync";
 const GOOGLE_DISCONNECT: &str = "google-account.disconnect";
 
 pub fn is_google_account_write(id: &str) -> bool {
-    [GOOGLE_CONNECT, GOOGLE_DISCONNECT].contains(&id)
+    [GOOGLE_CONNECT, GOOGLE_DISCONNECT, GOOGLE_AVATAR_SYNC].contains(&id)
 }
 
 #[derive(Clone)]
@@ -68,6 +69,7 @@ impl Requests {
             )),
             google_account: Arc::new(remya_google_account::Account::new(
                 roots.shared.join("google-oauth-client.json"),
+                roots.cache.clone(),
             )),
             apps: Arc::new(Mutex::new(remya_app_preferences::Store::new(
                 roots.system.parent().expect("config root").into(),
@@ -142,11 +144,20 @@ impl Requests {
         match id {
             GOOGLE_CONNECT => {
                 if !raw.trim_start().starts_with('{') {
-                    return Err("InvalidArgument:Expected {calendar?:bool,tasks?:bool}.".into());
+                    return Err(
+                        "InvalidArgument:Expected {calendar?:bool,tasks?:bool,profile?:bool}."
+                            .into(),
+                    );
                 }
-                let requested = serde_json::from_str(raw)
-                    .map_err(|_| "InvalidArgument:Expected {calendar?:bool,tasks?:bool}.")?;
+                let requested = serde_json::from_str(raw).map_err(
+                    |_| "InvalidArgument:Expected {calendar?:bool,tasks?:bool,profile?:bool}.",
+                )?;
                 self.google_account.connect(requested)
+            }
+            GOOGLE_AVATAR_SYNC => {
+                let enabled: bool =
+                    serde_json::from_str(raw).map_err(|_| "InvalidArgument:Expected a boolean.")?;
+                self.google_account.set_avatar_sync(enabled)
             }
             GOOGLE_DISCONNECT => {
                 let value = serde_json::from_str::<Value>(raw)

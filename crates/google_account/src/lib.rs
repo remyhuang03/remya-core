@@ -1,8 +1,10 @@
 //! Core's shared Google identity and OAuth grant for desktop applications.
+mod avatar;
 mod flow;
 mod keyring;
 mod tasks;
 
+pub use avatar::AvatarSnapshot;
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use flow::Credentials;
 use keyring::Keyring;
@@ -19,6 +21,7 @@ use std::{
 pub struct Capabilities {
     calendar: bool,
     tasks: bool,
+    profile: bool,
 }
 
 impl Capabilities {
@@ -26,11 +29,14 @@ impl Capabilities {
         Self {
             calendar: self.calendar || requested.calendar,
             tasks: self.tasks || requested.tasks,
+            profile: self.profile || requested.profile,
         }
     }
 
     fn includes(self, requested: Self) -> bool {
-        (!requested.calendar || self.calendar) && (!requested.tasks || self.tasks)
+        (!requested.calendar || self.calendar)
+            && (!requested.tasks || self.tasks)
+            && (!requested.profile || self.profile)
     }
 }
 
@@ -41,6 +47,8 @@ struct Grant {
     email: String,
     capabilities: Capabilities,
     refresh_token: String,
+    #[serde(default)]
+    avatar_sync: bool,
 }
 
 #[derive(Serialize)]
@@ -52,17 +60,21 @@ pub struct Status {
     account_id: Option<String>,
     #[serde(flatten)]
     capabilities: Capabilities,
+    #[serde(rename = "avatarSync")]
+    avatar_sync: bool,
     error: Option<String>,
 }
 
 #[derive(Default)]
 struct State {
+    avatar: AvatarSnapshot,
     pending: bool,
     error: Option<String>,
 }
 
 pub struct Account {
     config: PathBuf,
+    avatar_cache: PathBuf,
     keyring: Keyring,
     state: Mutex<State>,
     tasks: Mutex<Option<tasks::AccessToken>>,
@@ -72,11 +84,12 @@ pub struct Account {
 }
 
 impl Account {
-    pub fn new(config: PathBuf) -> Self {
+    pub fn new(config: PathBuf, avatar_cache: PathBuf) -> Self {
         let namespace =
             URL_SAFE_NO_PAD.encode(Sha256::digest(config.as_os_str().as_encoded_bytes()));
         Self {
             config,
+            avatar_cache,
             keyring: Keyring::new(namespace),
             state: Mutex::default(),
             tasks: Mutex::default(),
@@ -109,15 +122,16 @@ impl Account {
             ),
             _ => None,
         };
-        let (email, account_id, capabilities, keyring_error) = match grant {
+        let (email, account_id, capabilities, avatar_sync, keyring_error) = match grant {
             Ok(Some(grant)) => (
                 Some(grant.email),
                 Some(grant.subject),
                 grant.capabilities,
+                grant.avatar_sync,
                 None,
             ),
-            Ok(None) => (None, None, Capabilities::default(), None),
-            Err(error) => (None, None, Capabilities::default(), Some(error)),
+            Ok(None) => (None, None, Capabilities::default(), false, None),
+            Err(error) => (None, None, Capabilities::default(), false, Some(error)),
         };
         Status {
             configured,
@@ -125,6 +139,7 @@ impl Account {
             email,
             account_id,
             capabilities,
+            avatar_sync,
             error: config_error
                 .or_else(|| state.error.clone())
                 .or(keyring_error),
@@ -143,13 +158,21 @@ impl Account {
     }
 
     pub fn connect(self: &Arc<Self>, requested: Capabilities) -> Result<Status, String> {
+        self.authorize(requested, false)
+    }
+
+    fn authorize(
+        self: &Arc<Self>,
+        requested: Capabilities,
+        enable_avatar: bool,
+    ) -> Result<Status, String> {
         let mut state = self.state.lock().unwrap();
         if state.pending {
             return Err("A Google authorization is already in progress.".into());
         }
         let client = Credentials::load(&self.config)?
             .ok_or("Unavailable:Google OAuth client credentials are missing.")?;
-        let previous = self
+        let mut previous = self
             .keyring
             .load()
             .map_err(|error| format!("Unavailable:{error}"))?;
@@ -160,6 +183,19 @@ impl Account {
                 "Disconnect the previous Google authorization before using the new client.".into(),
             );
         }
+        if enable_avatar {
+            let grant = previous
+                .as_mut()
+                .ok_or("Unavailable:Connect a Google account first.")?;
+            if grant.capabilities.profile {
+                grant.avatar_sync = true;
+                self.keyring.store(grant)?;
+                state.avatar.enabled = true;
+                state.error = None;
+                self.notify();
+                return Ok(Self::snapshot(&state, Ok(Some(client)), Ok(previous)));
+            }
+        }
         let requested = previous
             .as_ref()
             .map_or(requested, |grant| grant.capabilities.with(requested));
@@ -167,23 +203,26 @@ impl Account {
         let client_for_worker = client.clone();
         let old_identity = previous
             .as_ref()
-            .map(|grant| (grant.subject.clone(), grant.capabilities));
+            .map(|grant| (grant.subject.clone(), grant.capabilities, grant.avatar_sync));
         thread::Builder::new()
             .name("google-oauth".into())
             .spawn(move || {
                 let result = flow::authorize(client_for_worker, requested);
                 let mut tasks = account.tasks.lock().unwrap();
                 let mut state = account.state.lock().unwrap();
-                state.error = match result.and_then(|grant| {
-                    if let Some((subject, capabilities)) = old_identity {
+                state.error = match result.and_then(|mut grant| {
+                    if let Some((subject, capabilities, avatar_sync)) = old_identity {
                         if grant.subject != subject {
                             return Err("Select the connected Google account or disconnect it before switching accounts.".into());
                         }
                         if !grant.capabilities.includes(capabilities) {
                             return Err("Google did not grant all previously enabled permissions. The existing connection was kept.".into());
                         }
+                        grant.avatar_sync = avatar_sync;
                     }
+                    grant.avatar_sync |= enable_avatar && grant.capabilities.profile;
                     account.keyring.store(&grant)?;
+                    state.avatar.enabled = grant.avatar_sync;
                     *tasks = None;
                     Ok(grant)
                 }) {
@@ -211,6 +250,7 @@ impl Account {
             if let Some(grant) = self.keyring.load()? {
                 flow::revoke(&grant.refresh_token)?;
                 self.keyring.clear()?;
+                self.clear_avatar(&mut state, &grant.subject);
                 *tasks = None;
             }
             Ok(())

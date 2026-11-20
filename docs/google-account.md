@@ -25,11 +25,12 @@ It requests `openid email` and only the selected capabilities:
 
 | Capability | Google OAuth scope |
 | --- | --- |
+| Profile picture | `profile` |
 | Calendar read/write | `https://www.googleapis.com/auth/calendar.events` |
 | Tasks read/write | `https://www.googleapis.com/auth/tasks` |
 
 Core stores the refresh token, Google subject, email and granted capabilities
-together in the user's Secret Service keyring. Install libsecret (for
+together in the user's Secret Service keyring with the avatar sync selection. Install libsecret (for
 `secret-tool`) and run an unlocked Secret Service provider. Tokens stay out
 of settings, API responses, signals, and logs. Debug configuration roots
 use separate keyring entries.
@@ -57,6 +58,16 @@ replaced or disconnected.
 Disconnect revokes the Google grant and removes the local Secret Service
 entry. Google revocation affects the account's whole Remya Apps project.
 A revocation error preserves the local entry so the user can retry.
+
+## Profile picture sync
+
+Bar's Account page can enable sync for the connected Google account. The first
+enable may require authorizing the OpenID Connect `profile` scope with that same
+account. Core refreshes the photo at startup, after account changes, and every
+15 minutes while sync is enabled. Core verifies the UserInfo subject before
+downloading the photo and stores a private, normalized PNG cache. A temporary
+failure keeps the previously cached picture. Turning sync off or disconnecting
+restores the local picture and clears the synced cache when it is writable.
 
 ## Publishing
 

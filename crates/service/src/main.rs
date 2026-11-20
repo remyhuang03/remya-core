@@ -101,7 +101,7 @@ fn changed_payloads(
     if args
         .first()
         .is_some_and(|id| remya_system_information::account::IDS.contains(&id.as_str()))
-        && let Ok(account) = state.account.read()
+        && let Ok(account) = state.account_information()
     {
         signals.push(("account-information", account));
     }
@@ -204,10 +204,22 @@ fn run() -> Result<(), String> {
         }
     });
     let (google_changed, google_changes) = std::sync::mpsc::channel();
-    initial.requests.google_account.set_notifier(google_changed);
+    let (avatar_changed, avatar_changes) = std::sync::mpsc::sync_channel(1);
+    let requests = initial.requests.clone();
+    let apps = requests.apps.clone();
+    let appimages = initial.appimages.clone();
+    let storage = initial.storage.clone();
+    let bluetooth = initial.bluetooth.clone();
+    let state = Arc::new(Mutex::new(initial));
+    requests.google_account.set_notifier(google_changed);
+    let google_state = state.clone();
     let google_bus = bus.clone();
     std::thread::spawn(move || {
         for () in google_changes {
+            let _ = avatar_changed.try_send(());
+            if let Ok(value) = google_state.lock().unwrap().account_information() {
+                signal(&google_bus, "account-information", &value);
+            }
             signal(
                 &google_bus,
                 requests::GOOGLE_ACCOUNT,
@@ -215,12 +227,27 @@ fn run() -> Result<(), String> {
             );
         }
     });
-    let requests = initial.requests.clone();
-    let apps = requests.apps.clone();
-    let appimages = initial.appimages.clone();
-    let storage = initial.storage.clone();
-    let bluetooth = initial.bluetooth.clone();
-    let state = Arc::new(Mutex::new(initial));
+    let avatar_account = requests.google_account.clone();
+    let avatar_state = state.clone();
+    let avatar_bus = bus.clone();
+    std::thread::spawn(move || {
+        use std::{sync::mpsc::RecvTimeoutError, time::Duration};
+
+        loop {
+            if avatar_account.refresh_avatar(
+                remya_system_information::account::normalize_avatar,
+                remya_display::atomic_write,
+            ) && let Ok(value) = avatar_state.lock().unwrap().account_information()
+            {
+                signal(&avatar_bus, "account-information", &value);
+            }
+            if avatar_changes.recv_timeout(Duration::from_secs(900))
+                == Err(RecvTimeoutError::Disconnected)
+            {
+                break;
+            }
+        }
+    });
     let xml = include_str!("../../../packages/remya_client/api/core1.xml");
     let info = gio::DBusNodeInfo::for_xml(xml)
         .map_err(|e| e.to_string())?

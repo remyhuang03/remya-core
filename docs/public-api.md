@@ -925,7 +925,7 @@ state ownership and the explicit hardware verification limits.
 
 | CLI | D-Bus | Result |
 | --- | --- | --- |
-| `get account-information` | `Get("account-information")` | `api_version`, read-only `username`, nullable `avatar_path`/`avatar_revision`, and nullable `error` |
+| `get account-information` | `Get("account-information")` | `api_version`, read-only `username`, nullable `avatar_path`/`avatar_revision`, boolean `google_avatar_sync`, nullable `google_avatar_error`, and nullable `error` |
 | `get your-info.a1aaf352` | `Get(id)` | Service user's GLib/NSS username and the same account state |
 | `get your-info.58484bbb` | `Get(id)` | Saved shared Remya avatar path and the same account state |
 | `set your-info.58484bbb <json>` | `Set(id, json)` | Updated account state after atomic avatar persistence |
@@ -936,7 +936,7 @@ Avatar JSON is `{"path":"/absolute/image.png","crop":{"left":0,"top":0,"right":1
 GUI cropping and input behavior are documented in the
 [Settings client](../../remya-settings/docs/gui-client.md#avatar-editor).
 
-Username rejects Set with ReadOnly. `Changed("account-information", state)` reports avatar changes through the same versioned interface; `AccountInformationClient` supplies pure Dart helpers. Remya Settings and Remya Bar can edit the same picture with the shared avatar editor. The write affects only Remya’s picture and runs with ordinary user permissions. Manage Account and Login options remain unavailable previews.
+Username rejects Set with ReadOnly. `Changed("account-information", state)` reports avatar changes through the same versioned interface; `AccountInformationClient` supplies pure Dart helpers. Remya Settings and Remya Bar can edit the same picture with the shared avatar editor. When Google avatar sync is enabled, the account state uses the cached Google photo if it is available. Core preserves the user's local picture. The write affects only Remya’s picture and runs with ordinary user permissions. Manage Account and Login options remain unavailable previews.
 
 ## Sound
 
@@ -1470,16 +1470,22 @@ CLI examples: `remya get ai.providers`,
 [Desktop setup, OAuth scopes and publishing](google-account.md)
 
 `Get google-account` returns `{configured, pending, email, accountId, calendar,
-tasks, error}`. The four status/permission flags are booleans. `email`,
+tasks, profile, avatarSync, error}`. The status and permission flags are booleans. `email`,
 `accountId` and `error` are strings or null. `accountId` identifies the Google
 subject independently of its email address. The flags describe the last successful local grant,
 including when another browser authorization is pending.
 
 `Set google-account.connect '{"calendar":true,"tasks":true}'` starts a browser
-authorization and returns the pending status. Both keys are optional and
-default to false. No other keys are accepted. `Set google-account.disconnect
+authorization and returns the pending status. The optional keys are `calendar`,
+`tasks`, and `profile`, which default to false. `Set google-account.disconnect
 '{}'` revokes the shared grant and clears the local keyring entry, returning the
-new status. Both reject requests while browser authorization is pending.
+new status.
+
+`Set google-account.avatar-sync true` enables Google profile picture sync for
+the connected account and may start browser authorization for the profile scope.
+It returns Google account status. `false` restores the local picture. Changes
+to the effective picture or sync status emit `Changed("account-information", state)`.
+All three writes reject requests while browser authorization is pending.
 
 `Changed("google-account", "{}")` invalidates the status on a state change.
 Re-read with `Get`. The same operations are available as `remya get` and

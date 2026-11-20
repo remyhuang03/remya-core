@@ -17,6 +17,7 @@ pub(super) const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const JWKS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const CALENDAR: &str = "https://www.googleapis.com/auth/calendar.events";
+pub(super) const PROFILE: &str = "https://www.googleapis.com/auth/userinfo.profile";
 pub(super) const TASKS: &str = "https://www.googleapis.com/auth/tasks";
 
 #[derive(Clone, Deserialize)]
@@ -87,7 +88,7 @@ pub(super) fn google_https_fresh(http_status_as_error: bool) -> ureq::Agent {
     google_agent(http_status_as_error, Some(0))
 }
 
-fn response_json<T: DeserializeOwned>(
+pub(super) fn response_json<T: DeserializeOwned>(
     mut response: ureq::http::Response<ureq::Body>,
 ) -> Result<T, String> {
     if !response.status().is_success() {
@@ -121,6 +122,9 @@ pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<
     let nonce = random()?;
 
     let mut scopes = vec!["openid", "email"];
+    if requested.profile {
+        scopes.push("profile");
+    }
     if requested.calendar {
         scopes.push(CALENDAR);
     }
@@ -173,6 +177,7 @@ pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<
             email: identity.email,
             capabilities: granted_capabilities(&tokens.scope, requested),
             refresh_token,
+            avatar_sync: false,
         })
     })();
     reply(
@@ -187,7 +192,14 @@ fn granted_capabilities(scope: &str, requested: Capabilities) -> Capabilities {
     Capabilities {
         calendar: requested.calendar && scope.split_ascii_whitespace().any(|s| s == CALENDAR),
         tasks: requested.tasks && scope.split_ascii_whitespace().any(|s| s == TASKS),
+        profile: requested.profile && profile_granted(scope),
     }
+}
+
+pub(super) fn profile_granted(scope: &str) -> bool {
+    scope
+        .split_ascii_whitespace()
+        .any(|s| s == PROFILE || s == "profile")
 }
 
 #[derive(Debug, PartialEq)]
@@ -443,11 +455,14 @@ mod tests {
         let requested = Capabilities {
             calendar: true,
             tasks: true,
+            profile: true,
         };
         let granted =
             granted_capabilities(&format!("openid {CALENDAR} {TASKS}.readonly"), requested);
         assert!(granted.calendar);
         assert!(!granted.tasks);
+        assert!(!granted.profile);
+        assert!(granted_capabilities(PROFILE, requested).profile);
         assert!(!granted.includes(requested));
         assert!(!granted_capabilities(TASKS, Capabilities::default()).tasks);
     }

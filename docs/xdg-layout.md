@@ -24,9 +24,11 @@ Shared files are `theme.toml` (version and `[theme]`, see
 `google-oauth-client.json` is the optional Google Desktop OAuth client
 configuration in the shared root. Install it from the Google Cloud console
 with mode `0600`. Refresh tokens and granted account metadata live in the
-user's Secret Service keyring. See [Google account](google-account.md).
+user's Secret Service keyring, together with the Google avatar sync preference.
+See [Google account](google-account.md).
 
-Cache contains `models-dev.json` and `background-previews/`. Imported wallpapers
+Cache contains `models-dev.json`, `background-previews/`, and any synced
+profile photo as `google-avatar-<account hash>.png`. Imported wallpapers
 live in data `backgrounds/`. Battery history is state `power.sqlite3`, with SQLite
 WAL/SHM files beside it. Generated debug files are ignored by Git.
 Camera preview frames are process-local memory owned by the Settings GUI; the
