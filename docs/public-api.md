@@ -1464,3 +1464,23 @@ Each successful Set returns the current `ai.providers` Get reply and emits
 
 CLI examples: `remya get ai.providers`,
 `remya get ai.provider/claude`.
+
+## Google account
+
+[Desktop setup, OAuth scopes and publishing](google-account.md)
+
+`Get google-account` returns `{configured, pending, email, calendar, tasks,
+error}`. The four status/permission flags are booleans. `email` and `error`
+are strings or null. The flags describe the last successful local grant,
+including when another browser authorization is pending.
+
+`Set google-account.connect '{"calendar":true,"tasks":true}'` starts a browser
+authorization and returns the pending status. Both keys are optional and
+default to false. No other keys are accepted. `Set google-account.disconnect
+'{}'` revokes the shared grant and clears the local keyring entry, returning the
+new status. Both reject requests while browser authorization is pending.
+
+`Changed("google-account", "{}")` invalidates the status on a state change.
+Re-read with `Get`. The same operations are available as `remya get` and
+`remya set`, and through `GoogleAccountClient` on the public Dart
+`SettingsClient`. Tokens are never returned to callers.

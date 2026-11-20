@@ -620,6 +620,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
 
 [[package]]
+name = "form_urlencoded"
+version = "1.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cb4cb245038516f5f85277875cdaa4f7d2c9a0fa0468de06ed190163b1581fcf"
+dependencies = [
+ "percent-encoding",
+]
+
+[[package]]
 name = "fraction"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2032,6 +2041,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "remya_google_account"
+version = "0.2.0"
+dependencies = [
+ "base64",
+ "form_urlencoded",
+ "getrandom 0.4.3",
+ "gio",
+ "httparse",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "ureq",
+]
+
+[[package]]
 name = "remya_input"
 version = "0.2.0"
 dependencies = [
@@ -2090,6 +2115,7 @@ dependencies = [
  "remya_default_apps",
  "remya_display",
  "remya_fonts",
+ "remya_google_account",
  "remya_input",
  "remya_network",
  "remya_power",

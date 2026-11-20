@@ -8,6 +8,9 @@ const usage = '''Usage: remya <command> [arguments]
   get <theme|system|system-information|hostname|display|display-brightness|background|accent|fonts|startup|startup-candidates:query|network|proxy|airplane|bluetooth|sound|power|battery-saver|battery-history:json|cameras|account-information|updates|storage|printers|cleanup|font-search:query|font:family|catalog|about|page:id|setting-id>  Read state or metadata
   manage <feature>                   Start managing the current system snapshot
   set <setting-id> <value|->           Apply an available setting; - reads the value from stdin
+  get google-account                   Read the shared Google account status
+  set google-account.connect <json>    Start sign-in with optional calendar and tasks boolean flags
+  set google-account.disconnect '{}'  Revoke the shared Google connection
   replace <setting-id> <json|-> <revision>  Save an app preference if unchanged
   open-app <app> [page]              Open registered application settings
   install-appimage <path>            Install an AppImage and show its progress in Settings

@@ -10,6 +10,7 @@ name = "remyad"
 path = "src/main.rs"
 
 [dependencies]
+remya_google_account = { path = "../google_account" }
 remya_app_preferences = { path = "../app_preferences" }
 gio = { version = "0.21.5", features = ["v2_84"] }
 serde = { version = "1", features = ["derive"] }

@@ -12,9 +12,18 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+pub const GOOGLE_ACCOUNT: &str = "google-account";
+const GOOGLE_CONNECT: &str = "google-account.connect";
+const GOOGLE_DISCONNECT: &str = "google-account.disconnect";
+
+pub fn is_google_account_write(id: &str) -> bool {
+    [GOOGLE_CONNECT, GOOGLE_DISCONNECT].contains(&id)
+}
+
 #[derive(Clone)]
 pub struct Requests {
     pub ai: Arc<ai::Ai>,
+    pub google_account: Arc<remya_google_account::Account>,
     pub theme: Arc<Mutex<SharedTheme>>,
     pub background: Arc<Mutex<BackgroundManager<RealDesktop>>>,
     pub apps: Arc<Mutex<remya_app_preferences::Store>>,
@@ -23,7 +32,7 @@ pub struct Requests {
 
 impl Requests {
     pub fn new(roots: &Roots, catalog: &Value, background: BackgroundManager<RealDesktop>) -> Self {
-        let mut prefixes = BTreeSet::new();
+        let mut prefixes = BTreeSet::from([GOOGLE_ACCOUNT.to_owned()]);
         for page in catalog["pages"].as_array().unwrap() {
             prefixes.insert(
                 page["id"]
@@ -56,6 +65,9 @@ impl Requests {
             ai: Arc::new(ai::Ai::new(
                 roots.shared.join("ai.toml"),
                 roots.cache.join("models-dev.json"),
+            )),
+            google_account: Arc::new(remya_google_account::Account::new(
+                roots.shared.join("google-oauth-client.json"),
             )),
             apps: Arc::new(Mutex::new(remya_app_preferences::Store::new(
                 roots.system.parent().expect("config root").into(),
@@ -92,7 +104,9 @@ impl Requests {
             "OpenApp" => Some(self.apps.lock().unwrap().open(key, &args[1])),
             "Get" if ai::Ai::is_get(key) => Some(self.ai.get(key)),
             "Set" if ai::SET_IDS.contains(&key) => Some(self.ai.set(key, &args[1])),
+            "Set" if is_google_account_write(key) => Some(self.write_google_account(key, &args[1])),
             "Get" => match key {
+                GOOGLE_ACCOUNT => Some(Ok(serde_json::json!(self.google_account.status()))),
                 "theme" => Some(self.theme.lock().unwrap().read()),
                 "accent" => Some(Ok(self.background.lock().unwrap().accent_state())),
                 "installed-apps" => Some(applications::read()),
@@ -121,5 +135,28 @@ impl Requests {
             }
             _ => None,
         }
+    }
+
+    fn write_google_account(&self, id: &str, raw: &str) -> Result<Value, String> {
+        match id {
+            GOOGLE_CONNECT => {
+                if !raw.trim_start().starts_with('{') {
+                    return Err("InvalidArgument:Expected {calendar?:bool,tasks?:bool}.".into());
+                }
+                let requested = serde_json::from_str(raw)
+                    .map_err(|_| "InvalidArgument:Expected {calendar?:bool,tasks?:bool}.")?;
+                self.google_account.connect(requested)
+            }
+            GOOGLE_DISCONNECT => {
+                let value = serde_json::from_str::<Value>(raw)
+                    .map_err(|_| "InvalidArgument:Expected an empty object.")?;
+                if !value.as_object().is_some_and(serde_json::Map::is_empty) {
+                    return Err("InvalidArgument:Expected an empty object.".into());
+                }
+                self.google_account.disconnect()
+            }
+            _ => unreachable!(),
+        }
+        .map(|status| serde_json::json!(status))
     }
 }

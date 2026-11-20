@@ -461,6 +461,30 @@ def theme_session():
         service.wait(timeout=10)
 
 
+def google_account_checks():
+    account = {
+        'configured': False, 'pending': False, 'email': None,
+        'calendar': False, 'tasks': False, 'error': None,
+    }
+    assert account == cli('get', 'google-account') == dbus('Get', 'google-account')
+    for key, payload, error in [
+        ('connect', '{"calendar":true,"tasks":true}', 'Unavailable'),
+        ('connect', '{"calendar":"true"}', 'InvalidArgument'),
+        ('connect', '{"url":"https://example.com"}', 'InvalidArgument'),
+        ('connect', '[true,true]', 'InvalidArgument'),
+        ('disconnect', '{"confirm":true}', 'InvalidArgument'),
+    ]:
+        setting = f'google-account.{key}'
+        assert error in cli('set', setting, payload, ok=False)
+        try:
+            dbus('Set', setting, json.dumps(payload))
+        except subprocess.CalledProcessError as rejected:
+            assert rejected.returncode != 0
+        else:
+            raise AssertionError((setting, payload, 'D-Bus unexpectedly accepted the request'))
+    print('PASS: Google account status and input validation via CLI and D-Bus', flush=True)
+
+
 def session_checks():
     pid = None
     watcher = None
@@ -468,6 +492,7 @@ def session_checks():
     time.sleep(0.5)
     try:
         initial = cli('get', 'theme')
+        google_account_checks()
         app_preferences_checks()
         tools = cli('get', 'input-method-tools')
         assert tools == dbus('Get', 'input-method-tools')

@@ -190,6 +190,18 @@ fn run() -> Result<(), String> {
             }
         }
     });
+    let (google_changed, google_changes) = std::sync::mpsc::channel();
+    initial.requests.google_account.set_notifier(google_changed);
+    let google_bus = bus.clone();
+    std::thread::spawn(move || {
+        for () in google_changes {
+            signal(
+                &google_bus,
+                requests::GOOGLE_ACCOUNT,
+                &serde_json::json!({}),
+            );
+        }
+    });
     let requests = initial.requests.clone();
     let apps = requests.apps.clone();
     let appimages = initial.appimages.clone();
@@ -234,7 +246,9 @@ fn run() -> Result<(), String> {
                         Ok(value) => {
                             invocation.return_value(Some(&(value.to_string(),).to_variant()));
                             if ["Set", "Replace"].contains(&method.as_str()) {
-                                if args[0] != remya_applications::UNINSTALL {
+                                if args[0] != remya_applications::UNINSTALL
+                                    && !requests::is_google_account_write(&args[0])
+                                {
                                     signal(&bus, &args[0], &value);
                                 }
                                 if ai::SET_IDS.contains(&args[0].as_str())

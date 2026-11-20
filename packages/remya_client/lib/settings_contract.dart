@@ -31,3 +31,4 @@ export 'src/ai.dart';
 export 'src/printers.dart';
 
 export 'src/app_preferences.dart';
+export 'src/google_account.dart';

@@ -21,6 +21,11 @@ Shared files are `theme.toml` (version and `[theme]`, see
 `config/shared/theme.example.toml`), `accent.toml` (wallpaper accent), and `ai.toml`
 (custom AI endpoints, no application-specific preference table).
 
+`google-oauth-client.json` is the optional Google Desktop OAuth client
+configuration in the shared root. Install it from the Google Cloud console
+with mode `0600`. Refresh tokens and granted account metadata live in the
+user's Secret Service keyring. See [Google account](google-account.md).
+
 Cache contains `models-dev.json` and `background-previews/`. Imported wallpapers
 live in data `backgrounds/`. Battery history is state `power.sqlite3`, with SQLite
 WAL/SHM files beside it. Generated debug files are ignored by Git.
