@@ -154,6 +154,7 @@ impl Call {
             path.push_str(&query);
         }
         Ok(TaskRequest {
+            operation: format!("{resource}.{action}"),
             method,
             url: path,
             body,
@@ -239,6 +240,7 @@ fn task_body(mut body: Map<String, Value>, lists: bool, insert: bool) -> Result<
 }
 
 pub(super) struct TaskRequest {
+    operation: String,
     method: &'static str,
     url: String,
     body: String,
@@ -247,31 +249,124 @@ pub(super) struct TaskRequest {
     uncertain: Option<Failure>,
 }
 
+fn describe_transport_error(error: &ureq::Error) -> String {
+    match error {
+        ureq::Error::Io(io) => format!("io:{:?}", io.kind()),
+        ureq::Error::Timeout(timeout) => format!("timeout:{timeout:?}"),
+        ureq::Error::Protocol(_) => "protocol".into(),
+        ureq::Error::HostNotFound => "host_not_found".into(),
+        ureq::Error::ConnectionFailed => "connection_failed".into(),
+        ureq::Error::Tls(detail) => format!("tls:{detail}"),
+        ureq::Error::Rustls(detail) => format!("rustls:{detail}"),
+        ureq::Error::ConnectProxyFailed(_) => "connect_proxy_failed".into(),
+        other => format!("other:{other:?}"),
+    }
+}
+
+fn is_stale_pool_error(error: &ureq::Error) -> bool {
+    match error {
+        ureq::Error::ConnectionFailed => true,
+        ureq::Error::Io(io) => matches!(
+            io.kind(),
+            std::io::ErrorKind::UnexpectedEof
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::BrokenPipe
+        ),
+        _ => false,
+    }
+}
+
+fn classify_transport_error(error: &ureq::Error, uncertain: Option<Failure>) -> Failure {
+    match error {
+        ureq::Error::HostNotFound
+        | ureq::Error::ConnectionFailed
+        | ureq::Error::Tls(_)
+        | ureq::Error::Timeout(ureq::Timeout::Resolve | ureq::Timeout::Connect) => OFFLINE,
+        ureq::Error::Io(io)
+            if matches!(
+                io.kind(),
+                std::io::ErrorKind::NetworkUnreachable
+                    | std::io::ErrorKind::HostUnreachable
+                    | std::io::ErrorKind::ConnectionRefused
+                    | std::io::ErrorKind::AddrNotAvailable
+            ) =>
+        {
+            OFFLINE
+        }
+        _ => uncertain.unwrap_or(OFFLINE),
+    }
+}
+
 impl TaskRequest {
-    fn send(&self, agent: &Agent, token: &str) -> Result<Value, Failure> {
+    fn run_http(
+        &self,
+        agent: &Agent,
+        token: &str,
+        close: bool,
+    ) -> Result<Result<ureq::http::Response<ureq::Body>, ureq::Error>, Failure> {
         let mut request = Request::builder()
             .method(self.method)
             .uri(&self.url)
             .header("Authorization", format!("Bearer {token}"))
             .header("Accept", "application/json");
+        if close {
+            request = request.header("Connection", "close");
+        }
         if !self.body.is_empty() {
             request = request.header("Content-Type", "application/json");
         }
-        let request = request.body(self.body.as_str()).map_err(|_| ERROR)?;
-        let mut response = agent.run(request).map_err(|error| match error {
-            ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => OFFLINE,
-            ureq::Error::Io(ref io)
-                if matches!(
-                    io.kind(),
-                    std::io::ErrorKind::NetworkUnreachable
-                        | std::io::ErrorKind::HostUnreachable
-                        | std::io::ErrorKind::ConnectionRefused
-                ) =>
-            {
-                OFFLINE
+        if self.body.is_empty() && matches!(self.method, "GET" | "DELETE") {
+            let request = request.body(()).map_err(|_| ERROR)?;
+            Ok(agent.run(request))
+        } else {
+            let request = request.body(self.body.as_str()).map_err(|_| ERROR)?;
+            Ok(agent.run(request))
+        }
+    }
+
+    fn send_once(
+        &self,
+        agent: &Agent,
+        token: &str,
+        close: bool,
+    ) -> Result<ureq::http::Response<ureq::Body>, Failure> {
+        self.run_http(agent, token, close)?.map_err(|error| {
+            eprintln!(
+                "google_account tasks {} {} transport failed: {}",
+                self.method,
+                self.operation,
+                describe_transport_error(&error)
+            );
+            classify_transport_error(&error, self.uncertain)
+        })
+    }
+
+    fn send(&self, pooled: &Agent, fresh: &Agent, token: &str) -> Result<Value, Failure> {
+        let mut response = if self.uncertain.is_some() {
+            self.send_once(fresh, token, true)?
+        } else {
+            match self.run_http(pooled, token, false)? {
+                Ok(response) => response,
+                Err(ref error) if is_stale_pool_error(error) => {
+                    eprintln!(
+                        "google_account tasks {} {} pooled transport failed ({}), retrying fresh",
+                        self.method,
+                        self.operation,
+                        describe_transport_error(error)
+                    );
+                    self.send_once(fresh, token, true)?
+                }
+                Err(error) => {
+                    eprintln!(
+                        "google_account tasks {} {} transport failed: {}",
+                        self.method,
+                        self.operation,
+                        describe_transport_error(&error)
+                    );
+                    return Err(classify_transport_error(&error, self.uncertain));
+                }
             }
-            _ => self.uncertain.unwrap_or(OFFLINE),
-        })?;
+        };
         let status = response.status().as_u16();
         let body = response.body_mut();
         match status {
@@ -281,27 +376,78 @@ impl TaskRequest {
                     body.with_config().limit(RESPONSE_LIMIT).reader(),
                 )
                 .map_err(|error| {
+                    eprintln!(
+                        "google_account tasks {} {} body decode failed (io={})",
+                        self.method,
+                        self.operation,
+                        error.is_io()
+                    );
                     self.uncertain
                         .unwrap_or(if error.is_io() { RETRY } else { ERROR })
                 })?;
                 if self.creates && value["id"].as_str().is_none_or(str::is_empty) {
+                    eprintln!(
+                        "google_account tasks {} {} missing created id",
+                        self.method, self.operation
+                    );
                     return Err(AMBIGUOUS_CREATE);
                 }
                 value.is_object().then_some(value).ok_or(ERROR)
             }
-            401 => Err(AUTH),
+            401 => {
+                eprintln!(
+                    "google_account tasks {} {} http 401",
+                    self.method, self.operation
+                );
+                Err(AUTH)
+            }
             403 => {
                 let error = serde_json::from_reader::<_, Value>(
                     body.with_config().limit(16 * 1024).reader(),
                 )
                 .unwrap_or(Value::Null);
-                Err(permission(&error))
+                let failure = permission(&error);
+                eprintln!(
+                    "google_account tasks {} {} http 403 -> {}",
+                    self.method, self.operation, failure.0
+                );
+                Err(failure)
             }
-            404 | 410 => Err(MISSING),
-            400 | 405 | 422 => Err(DENIED),
-            409 | 429 => Err(RETRY),
-            408 | 500..=599 => Err(self.uncertain.unwrap_or(RETRY)),
-            _ => Err(self.uncertain.unwrap_or(ERROR)),
+            404 | 410 => {
+                eprintln!(
+                    "google_account tasks {} {} http {status}",
+                    self.method, self.operation
+                );
+                Err(MISSING)
+            }
+            400 | 405 | 422 => {
+                eprintln!(
+                    "google_account tasks {} {} http {status}",
+                    self.method, self.operation
+                );
+                Err(DENIED)
+            }
+            409 | 429 => {
+                eprintln!(
+                    "google_account tasks {} {} http {status}",
+                    self.method, self.operation
+                );
+                Err(RETRY)
+            }
+            408 | 500..=599 => {
+                eprintln!(
+                    "google_account tasks {} {} http {status}",
+                    self.method, self.operation
+                );
+                Err(self.uncertain.unwrap_or(RETRY))
+            }
+            _ => {
+                eprintln!(
+                    "google_account tasks {} {} unexpected http {status}",
+                    self.method, self.operation
+                );
+                Err(self.uncertain.unwrap_or(ERROR))
+            }
         }
     }
 }
@@ -352,17 +498,25 @@ fn refresh(
     }
     let mut response = agent
         .post(TOKEN_URL)
+        .header("Connection", "close")
         .send_form([
             ("client_id", client.client_id.as_str()),
             ("client_secret", client.client_secret.as_str()),
             ("refresh_token", grant.refresh_token.as_str()),
             ("grant_type", "refresh_token"),
         ])
-        .map_err(|_| OFFLINE)?;
+        .map_err(|error| {
+            eprintln!(
+                "google_account tasks token refresh transport failed: {}",
+                describe_transport_error(&error)
+            );
+            OFFLINE
+        })?;
     let code = response.status().as_u16();
     let reader = response.body_mut().with_config().limit(64 * 1024).reader();
     if code == 400 || code == 401 {
         let error = serde_json::from_reader::<_, Value>(reader).unwrap_or(Value::Null);
+        eprintln!("google_account tasks token refresh http {code}");
         return Err(match error["error"].as_str() {
             Some("invalid_grant" | "invalid_scope" | "unauthorized_client" | "invalid_client") => {
                 AUTH
@@ -371,9 +525,11 @@ fn refresh(
         });
     }
     if code == 429 || code >= 500 {
+        eprintln!("google_account tasks token refresh http {code}");
         return Err(RETRY);
     }
     if code != 200 {
+        eprintln!("google_account tasks token refresh http {code}");
         return Err(ERROR);
     }
     let token: Token = serde_json::from_reader(reader).map_err(|_| ERROR)?;
@@ -399,7 +555,8 @@ fn refresh(
 }
 
 pub(super) fn execute(
-    agent: &Agent,
+    pooled: &Agent,
+    fresh: &Agent,
     cache: &mut Option<AccessToken>,
     client: &Credentials,
     grant: &Grant,
@@ -411,9 +568,9 @@ pub(super) fn execute(
         .is_some_and(|token| token.fingerprint == fingerprint && token.expires > Instant::now());
     if !cached {
         *cache = None;
-        *cache = Some(refresh(agent, client, grant, fingerprint)?);
+        *cache = Some(refresh(fresh, client, grant, fingerprint)?);
     }
-    let result = request.send(agent, &cache.as_ref().unwrap().value);
+    let result = request.send(pooled, fresh, &cache.as_ref().unwrap().value);
     // Authentication failure from a cached token invalidates it before the next request.
     // Avoid replaying a write while the client may already be nearing its D-Bus timeout.
     if result == Err(AUTH) {
@@ -507,5 +664,49 @@ mod tests {
             RETRY
         );
         assert_eq!(permission(&json!({})), DENIED);
+    }
+
+    #[test]
+    fn pre_send_transport_errors_are_offline_and_pool_errors_are_detected() {
+        for err in [
+            ureq::Error::HostNotFound,
+            ureq::Error::ConnectionFailed,
+            ureq::Error::Tls("handshake"),
+            ureq::Error::Timeout(ureq::Timeout::Resolve),
+            ureq::Error::Timeout(ureq::Timeout::Connect),
+            ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::AddrNotAvailable)),
+        ] {
+            assert_eq!(
+                classify_transport_error(&err, Some(AMBIGUOUS_CREATE)),
+                OFFLINE
+            );
+        }
+
+        assert_eq!(
+            classify_transport_error(
+                &ureq::Error::Timeout(ureq::Timeout::Global),
+                Some(AMBIGUOUS_CREATE)
+            ),
+            AMBIGUOUS_CREATE
+        );
+        assert_eq!(
+            classify_transport_error(
+                &ureq::Error::Io(std::io::Error::from(std::io::ErrorKind::UnexpectedEof)),
+                Some(AMBIGUOUS_CREATE),
+            ),
+            AMBIGUOUS_CREATE
+        );
+
+        assert!(is_stale_pool_error(&ureq::Error::ConnectionFailed));
+        for kind in [
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::BrokenPipe,
+        ] {
+            assert!(is_stale_pool_error(&ureq::Error::Io(std::io::Error::from(
+                kind
+            ))));
+        }
+        assert!(!is_stale_pool_error(&ureq::Error::HostNotFound));
     }
 }

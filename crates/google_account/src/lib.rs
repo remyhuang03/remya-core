@@ -67,6 +67,7 @@ pub struct Account {
     state: Mutex<State>,
     tasks: Mutex<Option<tasks::AccessToken>>,
     tasks_agent: ureq::Agent,
+    tasks_fresh_agent: ureq::Agent,
     notifier: Mutex<Option<Sender<()>>>,
 }
 
@@ -80,6 +81,7 @@ impl Account {
             state: Mutex::default(),
             tasks: Mutex::default(),
             tasks_agent: flow::google_https(false),
+            tasks_fresh_agent: flow::google_https_fresh(false),
             notifier: Mutex::default(),
         }
     }
@@ -243,7 +245,14 @@ impl Account {
         else {
             return Err(tasks::AUTH.to_string());
         };
-        tasks::execute(&self.tasks_agent, &mut tasks, &client, &grant, &request)
-            .map_err(|error| error.to_string())
+        tasks::execute(
+            &self.tasks_agent,
+            &self.tasks_fresh_agent,
+            &mut tasks,
+            &client,
+            &grant,
+            &request,
+        )
+        .map_err(|error| error.to_string())
     }
 }

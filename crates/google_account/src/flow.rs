@@ -64,14 +64,27 @@ fn random() -> Result<String, String> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-pub(super) fn google_https(http_status_as_error: bool) -> ureq::Agent {
-    ureq::Agent::config_builder()
+fn google_agent(http_status_as_error: bool, max_idle: Option<usize>) -> ureq::Agent {
+    let mut config = ureq::Agent::config_builder()
         .https_only(true)
         .max_redirects(0)
-        .timeout_global(Some(Duration::from_secs(8)))
-        .http_status_as_error(http_status_as_error)
-        .build()
-        .into()
+        .timeout_connect(Some(Duration::from_secs(8)))
+        .timeout_global(Some(Duration::from_secs(15)))
+        .http_status_as_error(http_status_as_error);
+    if let Some(limit) = max_idle {
+        config = config
+            .max_idle_connections(limit)
+            .max_idle_connections_per_host(limit);
+    }
+    config.build().into()
+}
+
+pub(super) fn google_https(http_status_as_error: bool) -> ureq::Agent {
+    google_agent(http_status_as_error, None)
+}
+
+pub(super) fn google_https_fresh(http_status_as_error: bool) -> ureq::Agent {
+    google_agent(http_status_as_error, Some(0))
 }
 
 fn response_json<T: DeserializeOwned>(
