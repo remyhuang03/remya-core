@@ -43,6 +43,8 @@
 - This project uses the PolyForm Noncommercial License 1.0.0 (`LICENSE`). Check dependency license compatibility and preserve third-party notices. Prefer permissive licenses; keep LGPL libraries dynamically linked or in separate processes; do not introduce GPL, AGPL, SSPL or other incompatible strong-copyleft code.
 
 ## Validation
+- Run `python tool/check_source_length.py` as part of local validation. It warns for Rust and Dart source files over 800 physical lines, including comments and blank lines. Review every reported file against the single-responsibility principle and refactor files that mix responsibilities.
+- When a reviewed file should stay together, run `python tool/check_source_length.py add <path> --reason "<why it should stay together>"` and include the updated `tool/source_length_exceptions.json` in the change. The exception applies only to that file's recorded SHA-256. Changed files still over 800 lines require another review.
 - Run before presenting changes:
   ```bash
   cargo fmt --all -- --check
