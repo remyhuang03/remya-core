@@ -1,1 +1,6 @@
-{}
+{
+  "crates/display/src/manager.rs": {
+    "reason": "The display manager owns output validation and live/saved display transactions. Its brightness methods route to the separate hardware backend, and the colocated tests exercise the compositor transaction state machine.",
+    "sha256": "ff38ac71080a43db7f199a3d3b9cea7b351c5238dbc187b717d11e5366b6326a"
+  }
+}

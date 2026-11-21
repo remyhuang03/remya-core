@@ -6,6 +6,7 @@ use crate::{
 };
 use remya_applications as applications;
 use remya_background::{BackgroundManager, RealDesktop};
+use remya_display::software_dimming::{OUTPUT_PREFIX, SoftwareDimming};
 use serde_json::Value;
 use std::{
     collections::BTreeSet,
@@ -28,6 +29,7 @@ pub struct Requests {
     pub theme: Arc<Mutex<SharedTheme>>,
     pub background: Arc<Mutex<BackgroundManager<RealDesktop>>>,
     pub apps: Arc<Mutex<remya_app_preferences::Store>>,
+    pub software_dimming: Arc<Mutex<SoftwareDimming>>,
     catalog_prefixes: Arc<BTreeSet<String>>,
 }
 
@@ -77,6 +79,7 @@ impl Requests {
                 prefixes.clone(),
                 remya_display::atomic_write,
             ))),
+            software_dimming: Arc::default(),
             catalog_prefixes: Arc::new(prefixes),
         }
     }
@@ -93,6 +96,13 @@ impl Requests {
         args: &[String],
     ) -> Option<Result<Value, String>> {
         let key = args.first().map(String::as_str).unwrap_or_default();
+        if let Some(output) = key.strip_prefix(OUTPUT_PREFIX) {
+            return match method {
+                "Get" => Some(Ok(self.software_dimming.lock().unwrap().get(output))),
+                "Set" => Some(self.software_dimming.lock().unwrap().set(output, &args[1])),
+                _ => None,
+            };
+        }
         if ["Get", "Set", "Replace"].contains(&method) && self.is_app_setting(key) {
             let mut apps = self.apps.lock().unwrap();
             return Some(match method {

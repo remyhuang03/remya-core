@@ -7,6 +7,7 @@ pub mod manager;
 pub mod model;
 pub mod night_light;
 pub mod rules;
+pub mod software_dimming;
 
 pub use files::atomic_write;
 pub use hyprland::{Compositor, Hyprctl, Monitor, run_bytes};

@@ -534,8 +534,11 @@ impl Power {
                     && let Some(original) = b.percent
                 {
                     let wanted = (original * 70 / 100).max(1);
-                    let actual = backend.set(&m.name, &outputs, wanted)?;
-                    self.dimmed.push((m.name.clone(), original, actual));
+                    if wanted < original
+                        && let Some(actual) = backend.set(&m.name, &outputs, wanted)?.percent
+                    {
+                        self.dimmed.push((m.name.clone(), original, actual));
+                    }
                 }
             }
         } else if !dim {

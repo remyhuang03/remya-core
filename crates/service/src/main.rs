@@ -254,6 +254,7 @@ fn run() -> Result<(), String> {
         .lookup_interface(INTERFACE)
         .unwrap();
     let handler = state.clone();
+    let software_dimming = requests.software_dimming.clone();
     let main_loop = glib::MainLoop::new(None, false);
     let quit = main_loop.clone();
     let _registration = bus
@@ -289,7 +290,14 @@ fn run() -> Result<(), String> {
                                 if args[0] != remya_applications::UNINSTALL
                                     && !requests::is_google_account_write(&args[0])
                                 {
-                                    signal(&bus, &args[0], &value);
+                                    let topic = if args[0]
+                                        .starts_with(remya_display::software_dimming::OUTPUT_PREFIX)
+                                    {
+                                        remya_display::software_dimming::TOPIC
+                                    } else {
+                                        &args[0]
+                                    };
+                                    signal(&bus, topic, &value);
                                 }
                                 if ai::SET_IDS.contains(&args[0].as_str())
                                     && args[0] != ai::PROVIDERS
@@ -443,6 +451,11 @@ fn run() -> Result<(), String> {
     });
     glib::timeout_add_seconds_local(1, move || {
         ticks += 1;
+        if let Ok(mut dimming) = software_dimming.try_lock() {
+            for value in dimming.changes() {
+                signal(&poll_bus, remya_display::software_dimming::TOPIC, &value);
+            }
+        }
         if bluetooth.take_dirty() {
             signal(&poll_bus, "bluetooth", &bluetooth.state());
         }

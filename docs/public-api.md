@@ -87,6 +87,7 @@ No command evaluates shell input. IDs are stable catalog IDs, not translated lab
 | `get display` | `Get(s key)` with `display` | Outputs, modes, saved and actual values, conflicts, pending change, write blocker |
 | `get night-light` | `Get(s key)` with `night-light` | Saved and system preferences, live state, conflict, write blocker, error |
 | `get display-gamma` | `Get(s key)` with `display-gamma` | Live hyprsunset gamma percentage (`10`–`100`), or why it is unavailable |
+| `get display-gamma:<output>` | `Get(s key)` with `display-gamma:<output>` | Live software dimming for one active Wayland output |
 | `get display-brightness` | `Get(s key)` with `display-brightness` | Hardware brightness per active output, or why it is unavailable |
 | `get display-brightness:<output>` | `Get(s key)` with `display-brightness:<output>` | Hardware brightness for one active output |
 | `get catalog` | `Get(s key)` with `catalog` | Sources, categories, and page summaries |
@@ -447,12 +448,13 @@ output skips its geometry. Empty geometry while an output wakes is a detection e
 Hyprland `monitoradded`, `monitorremoved`, and `configreloaded` events trigger a check.
 
 **Brightness** is live hardware state and is excluded from reconciliation because
-keys and other tools change it. Built-in panels read `/sys/class/backlight` and write
-through logind `Session.SetBrightness`, without root; the value never goes below 1%
-so a panel cannot go fully dark. External displays use the optional `ddcutil` command
-through a separate process, which needs the `i2c-dev` module and I2C access. Other
-outputs report a `reason`. Brightness is read when the page opens, not while polling,
-because DDC/CI is slow.
+keys and other tools change it. Built-in panels read `actual_brightness` from
+`/sys/class/backlight` and write through logind `Session.SetBrightness`, without
+root. External displays use the optional `ddcutil` command through a separate
+process, which needs the `i2c-dev` module and I2C access. Other outputs report a
+`reason`. Brightness is read when the page opens, not while polling, because
+DDC/CI is slow. See [live display controls](#live-display-controls) for the
+hardware floor and readback contract.
 
 `cargo test -p remya_display` covers parsing, validation, reconciliation,
 confirmation, and failures against a fake compositor. `../../remya-settings/test/display_test.dart` covers
@@ -1036,9 +1038,40 @@ when hypridle is unavailable. CLI get/set use the same operations. Use
 
 ## Live display controls
 
-`Get`/`Set display-gamma` controls live hyprsunset gamma (10–100).
+`Get`/`Set display-gamma` controls live hyprsunset gamma (10–100). Gamma is
+compositor-wide and can affect multiple outputs.
+
+`Get`/`Set display-gamma:<output>` controls software dimming for the named
+active Wayland output (10–100). Both return `{output,gamma,available,reason}`.
+Core uses a neutral gamma ramp with the same gain in each RGB channel.
+Setting 100 releases the output's gamma control and restores its default ramp.
+The request is confirmed by the Wayland protocol, which does not expose a
+hardware readback. An unsupported output, a disconnected output, or a
+rejected ramp reports `available: false`, `gamma: 100`, and a reason.
+Core does not fall back to the global gamma control. `Changed("display-gamma", …)`
+includes `output` for scoped writes and connection losses. Existing global
+responses and signals have no `output` field. Gamma is live state with no
+persistence. The output's ramp returns to normal when its control is released
+or the Core connection exits. This setting does not change night-light
+temperature or its schedule.
+
 `Get`/`Set display-brightness:<output>` controls hardware brightness for an active
-output. These are live observations and writes, excluded from saved conflicts.
+output. The value is 0–100. Logical `0` requests the backend's lowest safe
+nonzero hardware level. An exact readback at that level reports `percent: 0`.
+With only one raw level above zero, a positive request can also return the
+floor. A raw-zero observation from outside Core has `percent: null` and a
+`reason`. Core never writes raw zero.
+
+Each brightness observation includes `output`, `percent`, `backend`, `reason`,
+`raw_value`, `raw_max`, and `safe_min_raw`. The raw fields are null when no reading
+is available. A successful Set includes the observation both at the top level
+and in the one-element `outputs` list. Core requires exact raw readback at the
+floor and attempts to restore the previous visible raw level after a failed
+floor write. DDC/CI keeps a minimum of roughly 1% of VCP 10 (at least raw 1) and
+requires exact readback for every write. Kernel backlights use the same
+conservative default. See [device-specific raw-one opt-in](xdg-layout.md#backlight-controller-opt-in)
+for verified built-in panels. These are live observations and writes, excluded
+from saved conflicts.
 
 ## Startup apps
 

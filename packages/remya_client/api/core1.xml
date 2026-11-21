@@ -10,6 +10,8 @@
        and ai.custom {add}|{remove} return ai.providers and emit Changed for
        the written ID and ai.providers. -->
   <!-- Get/Set display-gamma controls live hyprsunset gamma (10-100).
+       Get/Set display-gamma:<output> controls one active Wayland output (10-100).
+       Both return {output,gamma,available,reason}. Changed uses display-gamma.
        Get/Set display-brightness:<output> controls hardware brightness. -->
   <!-- Airplane: Get airplane returns live derived radio state; Get/Set
        airplane.enabled and airplane.wifi accept boolean strings. Set airplane.enabled

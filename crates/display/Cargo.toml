@@ -8,7 +8,10 @@ license.workspace = true
 
 [dependencies]
 gio = { version = "0.21.5", features = ["v2_84"] }
+rustix = { version = "1.1", features = ["event"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3.23"
 toml = "0.9"
+wayland-client = "0.31"
+wayland-protocols-wlr = { version = "0.3", features = ["client"] }

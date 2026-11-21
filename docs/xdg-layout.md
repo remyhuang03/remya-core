@@ -67,6 +67,23 @@ Set or Resolve starts management too. Managed features preserve conflict rules
 and detection/persistence errors. Live-state exclusions are unchanged. The
 Remya-owned shared theme may initialize on first read.
 
+## Backlight controller opt-in
+
+For a built-in panel verified to remain visible at raw brightness 1, set
+`REMYA_BACKLIGHT_RAW_ONE` in the `top.remya.core.service` environment to the
+absolute canonical sysfs path of that controller. Obtain the path with
+`readlink -f /sys/class/backlight/<controller>`. For a persistent opt-in,
+use `systemctl --user edit top.remya.core.service` and set
+`Environment="REMYA_BACKLIGHT_RAW_ONE=/sys/devices/…/<controller>"` in the
+`[Service]` section, then restart the unit. Clear the opt-in and restart if
+the panel is replaced or its minimum is unsuitable. Changing the policy
+does not change the current hardware level.
+
+When first testing a lower raw level, arrange an independent timed restore
+to the previous visible level. The opt-in matches only that canonical
+controller path and applies only to kernel backlights. Core uses the
+conservative 1% raw floor for other controllers.
+
 ## Build and install
 
 ```sh

@@ -745,11 +745,9 @@ impl<C: Compositor> DisplayManager<C> {
             .map(|m| m.name.clone())
             .collect::<Vec<_>>();
         let actual = self.brightness.set(output, &names, percent)?;
-        Ok(json!({
-            "output": output,
-            "percent": actual,
-            "outputs": [{"output": output, "percent": actual}],
-        }))
+        let mut response = json!(actual);
+        response["outputs"] = json!([actual]);
+        Ok(response)
     }
 
     /// The value one setting reports for each connected output.
