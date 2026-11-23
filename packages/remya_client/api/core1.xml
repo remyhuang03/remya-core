@@ -117,6 +117,7 @@
     <!-- Get account-information reads the service username and shared Remya avatar.
          The username readout rejects Set; Set your-info.58484bbb accepts an image path
          and normalized crop rectangle. Changed account-information reports avatar updates. -->
+    <!-- Set google-account.cancel accepts {} and cancels pending authorization without revoking the grant. -->
     <!-- Get google-account returns {configured,pending,email,accountId,calendar,tasks,profile,avatarSync,error}.
          Set google-account.connect accepts {calendar?:bool,tasks?:bool,profile?:bool} and starts
          desktop authorization. Set google-account.disconnect takes {} and revokes.
@@ -129,6 +130,13 @@
     <method name="Get">
       <arg type="s" direction="in"/>
       <arg type="s" direction="out"/>
+    </method>
+    <!-- GoogleCalendar returns a read-only snapshot for the authorized account.
+         The JSON envelope is {accountId,timeMin,timeMax,calendarIds?,cacheOnly?}.
+         Tokens and calendar data are never broadcast as Changed signals. -->
+    <method name="GoogleCalendar">
+      <arg type="s" name="request" direction="in"/>
+      <arg type="s" name="result" direction="out"/>
     </method>
     <!-- GoogleTasks uses an account-bound allowlist of Tasks v1 requests.
          The JSON envelope is {accountId,operation,args?}; see docs/public-api.md.

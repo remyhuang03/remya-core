@@ -3,6 +3,7 @@ use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 use ring::signature::{RSA_PKCS1_2048_8192_SHA256, RsaPublicKeyComponents};
 use serde::{Deserialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     fs::File,
     io::{self, Read, Write},
@@ -16,7 +17,7 @@ const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
 pub(super) const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const JWKS_URL: &str = "https://www.googleapis.com/oauth2/v3/certs";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
-const CALENDAR: &str = "https://www.googleapis.com/auth/calendar.events";
+const CALENDAR: &str = "https://www.googleapis.com/auth/calendar.readonly";
 pub(super) const PROFILE: &str = "https://www.googleapis.com/auth/userinfo.profile";
 pub(super) const TASKS: &str = "https://www.googleapis.com/auth/tasks";
 
@@ -105,7 +106,11 @@ struct Tokens {
     id_token: String,
 }
 
-pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<Grant, String> {
+pub(super) fn authorize(
+    client: Credentials,
+    requested: Capabilities,
+    cancelled: &AtomicBool,
+) -> Result<Grant, String> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
         .map_err(|_| "Could not listen for the Google sign-in response.")?;
     listener
@@ -145,14 +150,16 @@ pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<
             ("nonce", &nonce),
         ])
         .finish();
+    check_cancelled(cancelled)?;
     gio::AppInfo::launch_default_for_uri(
         &format!("{AUTH_URL}?{query}"),
         gio::AppLaunchContext::NONE,
     )
     .map_err(|_| "Could not open the system browser for Google sign-in.")?;
 
-    let (code, mut browser) = wait_for_callback(listener, &address, &state)?;
+    let (code, mut browser) = wait_for_callback(listener, &address, &state, cancelled)?;
     let result = (|| {
+        check_cancelled(cancelled)?;
         let agent = google_https(true);
         let response = agent
             .post(TOKEN_URL)
@@ -171,11 +178,13 @@ pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<
             .refresh_token
             .filter(|token| !token.is_empty())
             .ok_or("Google did not provide a refresh token. Try connecting again.")?;
+        let capabilities = granted_capabilities(&tokens.scope, requested);
         Ok(Grant {
             client_id: client.client_id,
             subject: identity.sub,
             email: identity.email,
-            capabilities: granted_capabilities(&tokens.scope, requested),
+            capabilities,
+            calendar_readonly: capabilities.calendar,
             refresh_token,
             avatar_sync: false,
         })
@@ -190,10 +199,14 @@ pub(super) fn authorize(client: Credentials, requested: Capabilities) -> Result<
 
 fn granted_capabilities(scope: &str, requested: Capabilities) -> Capabilities {
     Capabilities {
-        calendar: requested.calendar && scope.split_ascii_whitespace().any(|s| s == CALENDAR),
+        calendar: requested.calendar && calendar_granted(scope),
         tasks: requested.tasks && scope.split_ascii_whitespace().any(|s| s == TASKS),
         profile: requested.profile && profile_granted(scope),
     }
+}
+
+pub(super) fn calendar_granted(scope: &str) -> bool {
+    scope.split_ascii_whitespace().any(|s| s == CALENDAR)
 }
 
 pub(super) fn profile_granted(scope: &str) -> bool {
@@ -232,13 +245,22 @@ fn parse_callback(path: &str, expected_state: &str) -> Option<Callback> {
     }
 }
 
+fn check_cancelled(cancelled: &AtomicBool) -> Result<(), String> {
+    if cancelled.load(Ordering::Relaxed) {
+        return Err("Google authorization was cancelled.".into());
+    }
+    Ok(())
+}
+
 fn wait_for_callback(
     listener: TcpListener,
     address: &str,
     state: &str,
+    cancelled: &AtomicBool,
 ) -> Result<(String, TcpStream), String> {
     let deadline = Instant::now() + Duration::from_secs(180);
     while Instant::now() < deadline {
+        check_cancelled(cancelled)?;
         match listener.accept() {
             Ok((mut browser, _)) => match read_callback(&mut browser, address, state) {
                 Some(Callback::Code(code)) => return Ok((code, browser)),
@@ -429,6 +451,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cancelled_authorization_stops_waiting_for_a_callback() {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+        let cancelled = AtomicBool::new(true);
+        assert_eq!(
+            wait_for_callback(listener, &address, "state", &cancelled).unwrap_err(),
+            "Google authorization was cancelled."
+        );
+    }
+
+    #[test]
     fn callback_requires_exact_path_state_and_unambiguous_result() {
         assert_eq!(
             parse_callback("/?code=a%2Bb&state=session", "session"),
@@ -460,6 +493,9 @@ mod tests {
         let granted =
             granted_capabilities(&format!("openid {CALENDAR} {TASKS}.readonly"), requested);
         assert!(granted.calendar);
+        assert!(!calendar_granted(
+            "https://www.googleapis.com/auth/calendar.events"
+        ));
         assert!(!granted.tasks);
         assert!(!granted.profile);
         assert!(granted_capabilities(PROFILE, requested).profile);

@@ -28,7 +28,10 @@ user's Secret Service keyring, together with the Google avatar sync preference.
 See [Google account](google-account.md).
 
 Cache contains `models-dev.json`, `background-previews/`, and any synced
-profile photo as `google-avatar-<account hash>.png`. Imported wallpapers
+profile photo as `google-avatar-<account hash>.png`. The private
+`google-calendar/` subdirectory contains account-scoped Calendar snapshots
+with synchronization tokens. Google OAuth credentials and refresh tokens
+are kept separately. Imported wallpapers
 live in data `backgrounds/`. Battery history is state `power.sqlite3`, with SQLite
 WAL/SHM files beside it. Generated debug files are ignored by Git.
 Camera preview frames are process-local memory owned by the Settings GUI; the

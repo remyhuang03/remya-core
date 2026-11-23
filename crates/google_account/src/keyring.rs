@@ -83,8 +83,12 @@ impl Keyring {
     pub(super) fn load(&self) -> Result<Option<Grant>, String> {
         let (status, bytes, diagnostic) = self.run(&["lookup"], None)?;
         if status.success() {
-            return serde_json::from_slice(&bytes)
-                .map(Some)
+            return serde_json::from_slice::<Grant>(&bytes)
+                .map(|mut grant| {
+                    // The legacy events grant cannot list the user's calendars.
+                    grant.capabilities.calendar &= grant.calendar_readonly;
+                    Some(grant)
+                })
                 .map_err(|_| "The stored Google authorization is unreadable.".into());
         }
         if status.code() == Some(1) && !diagnostic {

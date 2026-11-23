@@ -1518,12 +1518,48 @@ new status.
 the connected account and may start browser authorization for the profile scope.
 It returns Google account status. `false` restores the local picture. Changes
 to the effective picture or sync status emit `Changed("account-information", state)`.
-All three writes reject requests while browser authorization is pending.
+Connect, disconnect, and avatar sync writes reject requests while browser
+authorization is pending. `Set google-account.cancel '{}'` cancels the active
+authorization and returns the current account status. The existing grant
+remains active. Cancellation is safe to repeat when no authorization is pending.
 
 `Changed("google-account", "{}")` invalidates the status on a state change.
 Re-read with `Get`. The same operations are available as `remya get` and
 `remya set`, and through `GoogleAccountClient` on the public Dart
 `SettingsClient`. Tokens are never returned to callers.
+
+### Google Calendar
+
+`GoogleCalendar(request)` accepts a JSON object
+`{accountId, timeMin, timeMax, calendarIds?, cacheOnly?}`. Use the current
+`accountId` from `Get google-account`. Core requires that account's Calendar
+read-only grant. Pass an increasing pair of RFC 3339 instants with explicit
+offsets, at most 120 days apart. Omit `calendarIds` to use Google's selected
+calendars, supply an array of calendar IDs to override that selection, or pass
+an empty array for calendar metadata only. Core always returns the full list
+of readable calendars. With `cacheOnly: true` the call reads the private local
+snapshot without contacting Google.
+
+The reply contains `calendars`, `events`, `syncedAt` and `stale`. Calendar
+rows include `id`, `summary`, nullable `backgroundColor`, and Google's own
+`selected` flag. Event objects use Google Calendar names and include
+`calendarId` and the resolved `backgroundColor` from the event palette or its
+calendar. Recurring events are expanded. All-day start and exclusive end
+remain civil dates. The snapshot can include all-day instances just outside
+the requested instants for the caller's local day filtering. Attendee status
+includes only the current calendar's participant. `syncedAt` is UTC RFC 3339
+or null. A refresh failure can return usable cached rows with `stale: true`
+and `error` set to `auth`, `offline` or `retry`. Without a snapshot, D-Bus
+returns `CalendarAuth`, `CalendarOffline`, or `CalendarRetry` respectively.
+Malformed requests produce `InvalidArgument`. Missing configuration, a locked
+keyring, or a disabled Google Calendar API produces `Unavailable` when Core
+cannot return a snapshot.
+
+The CLI equivalent is `remya google-calendar <json|->` where `-` reads standard
+input. The Dart equivalent is `SettingsClient.googleCalendarRequest`. Callers
+authorize the capability through `google-account.connect` with
+`{"calendar":true}` or `SettingsClient.connectGoogleCalendar`. Core never
+broadcasts event data or returns OAuth and synchronization tokens.
 
 ### Google Tasks
 

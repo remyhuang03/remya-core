@@ -30,7 +30,7 @@ impl Account {
             );
         }
         let mut state = self.state.lock().unwrap();
-        if state.pending {
+        if state.authorization.is_some() {
             return Err("Wait for Google authorization to finish.".into());
         }
         let mut grant = self.keyring.load()?;
@@ -58,7 +58,7 @@ impl Account {
 
     fn avatar_path(&self, subject: &str) -> PathBuf {
         let id = URL_SAFE_NO_PAD.encode(Sha256::digest(subject.as_bytes()));
-        self.avatar_cache.join(format!("google-avatar-{id}.png"))
+        self.cache.join(format!("google-avatar-{id}.png"))
     }
 
     fn selected_grant(&self) -> Result<Option<(flow::Credentials, Grant)>, String> {

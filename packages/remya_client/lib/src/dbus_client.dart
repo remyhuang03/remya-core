@@ -13,6 +13,7 @@ const settingsObjectPath = '/top/remya/Core1';
 const settingsMethods = {
   'Get': 1,
   'GoogleTasks': 1,
+  'GoogleCalendar': 1,
   'Manage': 1,
   'Set': 2,
   'Replace': 3,
@@ -76,10 +77,11 @@ class SettingsClient {
         )
         .timeout(
           Duration(
-            seconds:
-                method == 'Set' && arguments.firstOrNull == 'installed.c3c4a29c'
-                ? 300
-                : 30,
+            seconds: switch (method) {
+              'Set' when arguments.firstOrNull == 'installed.c3c4a29c' => 300,
+              'GoogleCalendar' => 60,
+              _ => 30,
+            },
           ),
         );
     return jsonDecode(reply.returnValues.single.asString())

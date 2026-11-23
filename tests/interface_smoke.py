@@ -465,14 +465,18 @@ def google_account_checks():
     account = {
         'configured': False, 'pending': False, 'email': None, 'accountId': None,
         'calendar': False, 'tasks': False, 'error': None,
+        'profile': False, 'avatarSync': False,
     }
     assert account == cli('get', 'google-account') == dbus('Get', 'google-account')
+    assert account == cli('set', 'google-account.cancel', '{}')
+    assert account == dbus('Set', 'google-account.cancel', json.dumps('{}'))
     for key, payload, error in [
         ('connect', '{"calendar":true,"tasks":true}', 'Unavailable'),
         ('connect', '{"calendar":"true"}', 'InvalidArgument'),
         ('connect', '{"url":"https://example.com"}', 'InvalidArgument'),
         ('connect', '[true,true]', 'InvalidArgument'),
         ('disconnect', '{"confirm":true}', 'InvalidArgument'),
+        ('cancel', '{"confirm":true}', 'InvalidArgument'),
     ]:
         setting = f'google-account.{key}'
         assert error in cli('set', setting, payload, ok=False)
@@ -497,7 +501,24 @@ def google_account_checks():
             assert rejected.returncode != 0
         else:
             raise AssertionError((payload, 'D-Bus unexpectedly accepted the request'))
-    print('PASS: Google account and Tasks input validation via CLI and D-Bus', flush=True)
+    calendar_window = {
+        'accountId': '123', 'timeMin': '2026-11-01T00:00:00Z',
+        'timeMax': '2026-12-01T00:00:00Z',
+    }
+    for payload, expected in [
+        (calendar_window, 'Unavailable'),
+        ({**calendar_window, 'timeMax': '2027-09-01T00:00:00Z'}, 'InvalidArgument'),
+        ({**calendar_window, 'url': 'https://example.com'}, 'InvalidArgument'),
+    ]:
+        request = json.dumps(payload)
+        assert expected in cli('google-calendar', request, ok=False)
+        try:
+            dbus('GoogleCalendar', request)
+        except subprocess.CalledProcessError as rejected:
+            assert rejected.returncode != 0
+        else:
+            raise AssertionError((payload, 'D-Bus unexpectedly accepted the request'))
+    print('PASS: Google account, Tasks and Calendar validation via CLI and D-Bus', flush=True)
 
 
 def session_checks():

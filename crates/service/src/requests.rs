@@ -16,10 +16,17 @@ use std::{
 pub const GOOGLE_ACCOUNT: &str = "google-account";
 const GOOGLE_CONNECT: &str = "google-account.connect";
 const GOOGLE_AVATAR_SYNC: &str = "google-account.avatar-sync";
+const GOOGLE_CANCEL: &str = "google-account.cancel";
 const GOOGLE_DISCONNECT: &str = "google-account.disconnect";
 
 pub fn is_google_account_write(id: &str) -> bool {
-    [GOOGLE_CONNECT, GOOGLE_DISCONNECT, GOOGLE_AVATAR_SYNC].contains(&id)
+    [
+        GOOGLE_CONNECT,
+        GOOGLE_CANCEL,
+        GOOGLE_DISCONNECT,
+        GOOGLE_AVATAR_SYNC,
+    ]
+    .contains(&id)
 }
 
 #[derive(Clone)]
@@ -114,6 +121,7 @@ impl Requests {
         }
         match method {
             "GoogleTasks" => Some(self.google_account.tasks_request(key)),
+            "GoogleCalendar" => Some(self.google_account.calendar_request(key)),
             "OpenApp" => Some(self.apps.lock().unwrap().open(key, &args[1])),
             "Get" if ai::Ai::is_get(key) => Some(self.ai.get(key)),
             "Set" if ai::SET_IDS.contains(&key) => Some(self.ai.set(key, &args[1])),
@@ -169,13 +177,17 @@ impl Requests {
                     serde_json::from_str(raw).map_err(|_| "InvalidArgument:Expected a boolean.")?;
                 self.google_account.set_avatar_sync(enabled)
             }
-            GOOGLE_DISCONNECT => {
+            GOOGLE_CANCEL | GOOGLE_DISCONNECT => {
                 let value = serde_json::from_str::<Value>(raw)
                     .map_err(|_| "InvalidArgument:Expected an empty object.")?;
                 if !value.as_object().is_some_and(serde_json::Map::is_empty) {
                     return Err("InvalidArgument:Expected an empty object.".into());
                 }
-                self.google_account.disconnect()
+                if id == GOOGLE_CANCEL {
+                    Ok(self.google_account.cancel_authorization())
+                } else {
+                    self.google_account.disconnect()
+                }
             }
             _ => unreachable!(),
         }

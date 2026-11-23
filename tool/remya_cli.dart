@@ -12,6 +12,7 @@ const usage = '''Usage: remya <command> [arguments]
   set google-account.connect <json>    Start sign-in with optional calendar, tasks and profile flags
   set google-account.avatar-sync <true|false>  Set Google profile picture sync
   set google-account.disconnect '{}'  Revoke the shared Google connection
+  google-calendar <json|->            Read Google calendars and events; - reads JSON from stdin
   google-tasks <json|->               Run an account-bound Google Tasks operation; - reads JSON from stdin
   replace <setting-id> <json|-> <revision>  Save an app preference if unchanged
   open-app <app> [page]              Open registered application settings
@@ -85,6 +86,7 @@ Future<void> main(List<String> arguments) async {
     const methods = {
       'get': 'Get',
       'google-tasks': 'GoogleTasks',
+      'google-calendar': 'GoogleCalendar',
       'manage': 'Manage',
       'set': 'Set',
       'replace': 'Replace',
@@ -101,7 +103,9 @@ Future<void> main(List<String> arguments) async {
     final method = methods[command];
     if (method == null) throw ArgumentError('Unknown command: $command');
     // Passwords stay out of the process list by arriving on stdin.
-    final values = command == 'google-tasks' && args.singleOrNull == '-'
+    final values =
+        {'google-tasks', 'google-calendar'}.contains(command) &&
+            args.singleOrNull == '-'
         ? [(await utf8.decoder.bind(stdin).join()).trim()]
         : command == 'open' && args.isEmpty
         ? ['home']

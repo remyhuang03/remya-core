@@ -175,6 +175,7 @@ void main() {
         final invocations = <(String, List<String>)>[
           ('Get', ['theme']),
           ('GoogleTasks', ['{}']),
+          ('GoogleCalendar', ['{}']),
           ('Manage', ['display']),
           ('Set', ['themes.material-theme-mode', 'dark']),
           ('Replace', ['remya-bar.pos', '"top"', 'rev1']),
@@ -242,6 +243,43 @@ void main() {
             ),
           );
         }
+      },
+    );
+
+    test(
+      'Google Calendar preserves explicit selection and maps auth errors',
+      () async {
+        final bus = _FakeDBusClient();
+        final client = SettingsClient(bus: bus);
+        bus.onCallMethod = (record) async {
+          expect(record.name, 'GoogleCalendar');
+          expect(jsonDecode(record.values.single.asString()), {
+            'accountId': '123456',
+            'timeMin': '2026-11-01T00:00:00Z',
+            'timeMax': '2026-12-01T00:00:00Z',
+            'calendarIds': [],
+            'cacheOnly': true,
+          });
+          throw DBusMethodResponseException(
+            DBusMethodErrorResponse('$settingsInterface.CalendarAuth'),
+          );
+        };
+        await expectLater(
+          client.googleCalendarRequest(
+            accountId: '123456',
+            timeMin: '2026-11-01T00:00:00Z',
+            timeMax: '2026-12-01T00:00:00Z',
+            calendarIds: [],
+            cacheOnly: true,
+          ),
+          throwsA(
+            isA<GoogleCalendarException>().having(
+              (e) => e.code,
+              'code',
+              'auth',
+            ),
+          ),
+        );
       },
     );
 

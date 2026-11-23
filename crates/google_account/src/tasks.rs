@@ -42,6 +42,12 @@ pub(super) const BUSY: Failure =
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct Failure(&'static str, &'static str);
 
+impl Failure {
+    pub(super) fn code(self) -> &'static str {
+        self.0
+    }
+}
+
 impl fmt::Display for Failure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}:{}", self.0, self.1)
@@ -552,6 +558,24 @@ pub(super) fn refresh(
     })
 }
 
+pub(super) fn access_token<'a>(
+    agent: &Agent,
+    cache: &'a mut Option<AccessToken>,
+    client: &Credentials,
+    grant: &Grant,
+    accepts: fn(&str) -> bool,
+) -> Result<&'a str, Failure> {
+    let fingerprint = Sha256::digest(grant.refresh_token.as_bytes()).into();
+    let cached = cache
+        .as_ref()
+        .is_some_and(|token| token.fingerprint == fingerprint && token.expires > Instant::now());
+    if !cached {
+        *cache = None;
+        *cache = Some(refresh(agent, client, grant, fingerprint, accepts)?);
+    }
+    Ok(&cache.as_ref().unwrap().value)
+}
+
 pub(super) fn execute(
     pooled: &Agent,
     fresh: &Agent,
@@ -560,17 +584,10 @@ pub(super) fn execute(
     grant: &Grant,
     request: &TaskRequest,
 ) -> Result<Value, Failure> {
-    let fingerprint = Sha256::digest(grant.refresh_token.as_bytes()).into();
-    let cached = cache
-        .as_ref()
-        .is_some_and(|token| token.fingerprint == fingerprint && token.expires > Instant::now());
-    if !cached {
-        *cache = None;
-        *cache = Some(refresh(fresh, client, grant, fingerprint, |scope| {
-            scope.split_ascii_whitespace().any(|s| s == TASKS)
-        })?);
-    }
-    let result = request.send(pooled, fresh, &cache.as_ref().unwrap().value);
+    let token = access_token(fresh, cache, client, grant, |scope| {
+        scope.split_ascii_whitespace().any(|s| s == TASKS)
+    })?;
+    let result = request.send(pooled, fresh, token);
     // Authentication failure from a cached token invalidates it before the next request.
     // Avoid replaying a write while the client may already be nearing its D-Bus timeout.
     if result == Err(AUTH) {

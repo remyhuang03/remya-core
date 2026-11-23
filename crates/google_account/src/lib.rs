@@ -1,5 +1,6 @@
 //! Core's shared Google identity and OAuth grant for desktop applications.
 mod avatar;
+mod calendar;
 mod flow;
 mod keyring;
 mod tasks;
@@ -12,7 +13,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex, mpsc::Sender},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+        mpsc::Sender,
+    },
     thread,
 };
 
@@ -49,6 +54,8 @@ struct Grant {
     refresh_token: String,
     #[serde(default)]
     avatar_sync: bool,
+    #[serde(default)]
+    calendar_readonly: bool,
 }
 
 #[derive(Serialize)]
@@ -68,31 +75,33 @@ pub struct Status {
 #[derive(Default)]
 struct State {
     avatar: AvatarSnapshot,
-    pending: bool,
+    authorization: Option<Arc<AtomicBool>>,
     error: Option<String>,
 }
 
 pub struct Account {
     config: PathBuf,
-    avatar_cache: PathBuf,
+    cache: PathBuf,
     keyring: Keyring,
     state: Mutex<State>,
     tasks: Mutex<Option<tasks::AccessToken>>,
+    calendar: Mutex<calendar::State>,
     tasks_agent: ureq::Agent,
     tasks_fresh_agent: ureq::Agent,
     notifier: Mutex<Option<Sender<()>>>,
 }
 
 impl Account {
-    pub fn new(config: PathBuf, avatar_cache: PathBuf) -> Self {
+    pub fn new(config: PathBuf, cache: PathBuf) -> Self {
         let namespace =
             URL_SAFE_NO_PAD.encode(Sha256::digest(config.as_os_str().as_encoded_bytes()));
         Self {
             config,
-            avatar_cache,
+            cache,
             keyring: Keyring::new(namespace),
             state: Mutex::default(),
             tasks: Mutex::default(),
+            calendar: Mutex::default(),
             tasks_agent: flow::google_https(false),
             tasks_fresh_agent: flow::google_https_fresh(false),
             notifier: Mutex::default(),
@@ -135,7 +144,7 @@ impl Account {
         };
         Status {
             configured,
-            pending: state.pending,
+            pending: state.authorization.is_some(),
             email,
             account_id,
             capabilities,
@@ -167,7 +176,7 @@ impl Account {
         enable_avatar: bool,
     ) -> Result<Status, String> {
         let mut state = self.state.lock().unwrap();
-        if state.pending {
+        if state.authorization.is_some() {
             return Err("A Google authorization is already in progress.".into());
         }
         let client = Credentials::load(&self.config)?
@@ -204,12 +213,18 @@ impl Account {
         let old_identity = previous
             .as_ref()
             .map(|grant| (grant.subject.clone(), grant.capabilities, grant.avatar_sync));
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let worker_cancellation = cancellation.clone();
         thread::Builder::new()
             .name("google-oauth".into())
             .spawn(move || {
-                let result = flow::authorize(client_for_worker, requested);
+                let result = flow::authorize(client_for_worker, requested, &worker_cancellation);
                 let mut tasks = account.tasks.lock().unwrap();
+                let mut calendar = account.calendar.lock().unwrap();
                 let mut state = account.state.lock().unwrap();
+                if !state.authorization.as_ref().is_some_and(|active| Arc::ptr_eq(active, &worker_cancellation)) {
+                    return;
+                }
                 state.error = match result.and_then(|mut grant| {
                     if let Some((subject, capabilities, avatar_sync)) = old_identity {
                         if grant.subject != subject {
@@ -224,26 +239,42 @@ impl Account {
                     account.keyring.store(&grant)?;
                     state.avatar.enabled = grant.avatar_sync;
                     *tasks = None;
+                    calendar.invalidate_token();
                     Ok(grant)
                 }) {
                     Ok(grant) => (!grant.capabilities.includes(requested))
                         .then(|| "Some Google permissions were declined.".into()),
                     Err(error) => Some(error),
                 };
-                state.pending = false;
+                state.authorization = None;
                 account.notify();
             })
             .map_err(|_| "Could not start Google authorization.")?;
-        state.pending = true;
+        state.authorization = Some(cancellation);
         state.error = None;
         self.notify();
         Ok(Self::snapshot(&state, Ok(Some(client)), Ok(previous)))
     }
 
+    pub fn cancel_authorization(&self) -> Status {
+        {
+            let mut state = self.state.lock().unwrap();
+            if let Some(cancellation) = state.authorization.take() {
+                cancellation.store(true, Ordering::Relaxed);
+                self.notify();
+            }
+        }
+        self.status()
+    }
+
     pub fn disconnect(&self) -> Result<Status, String> {
         let mut tasks = self.tasks.try_lock().map_err(|_| tasks::BUSY.to_string())?;
+        let mut calendar = self
+            .calendar
+            .try_lock()
+            .map_err(|_| calendar::BUSY.to_string())?;
         let mut state = self.state.lock().unwrap();
-        if state.pending {
+        if state.authorization.is_some() {
             return Err("Wait for Google authorization to finish before disconnecting.".into());
         }
         let result = (|| {
@@ -251,6 +282,7 @@ impl Account {
                 flow::revoke(&grant.refresh_token)?;
                 self.keyring.clear()?;
                 self.clear_avatar(&mut state, &grant.subject);
+                calendar.clear(&self.cache, &grant);
                 *tasks = None;
             }
             Ok(())

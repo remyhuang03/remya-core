@@ -1,11 +1,10 @@
 # Google account
 
 Remya Core owns one Google connection per desktop user's Core configuration.
-Clients can connect with identity alone or authorize the Calendar and Tasks
-read/write capabilities. The same shared identity is available from every
-Remya application. The Bar Account page requests identity only. The Bar Tasks
-connection requests Tasks read/write access; Calendar authorization remains
-available for integration development.
+Clients can connect with identity alone, authorize Calendar read access, or
+authorize Tasks read/write access. Every Remya application uses the same shared
+identity. The Bar Account page requests identity only. Its Calendar and Tasks
+pages request their respective capabilities.
 
 ## Desktop configuration
 
@@ -26,7 +25,7 @@ It requests `openid email` and only the selected capabilities:
 | Capability | Google OAuth scope |
 | --- | --- |
 | Profile picture | `profile` |
-| Calendar read/write | `https://www.googleapis.com/auth/calendar.events` |
+| Calendar read-only | `https://www.googleapis.com/auth/calendar.readonly` |
 | Tasks read/write | `https://www.googleapis.com/auth/tasks` |
 
 Core stores the refresh token, Google subject, email and granted capabilities
@@ -40,6 +39,7 @@ use separate keyring entries.
 A connect request starts browser authorization and returns immediately.
 Clients can read the current status on the `google-account` invalidation.
 Authorization times out if the browser does not return within three minutes.
+Clients can cancel an abandoned authorization immediately and start a new one.
 Only one connect or disconnect operation runs at a time.
 
 Google's desktop authorization flow requires a new consent request when
@@ -49,11 +49,13 @@ If Google withholds a requested capability during first connection, Core
 records the partial grant and reports the missing consent. If reauthorization
 would remove a prior capability or switch identities, Core keeps the existing
 grant and reports the issue. The status reports the last successful grant.
-Core refreshes a short-lived access token when the Tasks API needs one. The
+Core refreshes short-lived Calendar and Tasks access tokens as needed. The
 Google subject is exposed as an opaque account identifier for cache isolation.
 Remote authorization failures tell the caller to reconnect the existing
-account. Core holds the access token in memory and clears it when a grant is
-replaced or disconnected.
+account. Core holds access tokens in memory and clears them when a grant is
+replaced or disconnected. The former Calendar events scope lacked calendar-list
+access. Connect Calendar again to grant read-only access while preserving
+existing Tasks and profile permissions.
 
 Disconnect revokes the Google grant and removes the local Secret Service
 entry. Google revocation affects the account's whole Remya Apps project.
@@ -69,17 +71,25 @@ downloading the photo and stores a private, normalized PNG cache. A temporary
 failure keeps the previously cached picture. Turning sync off or disconnecting
 restores the local picture and clears the synced cache when it is writable.
 
+## Calendar snapshots
+
+Calendar uses fixed HTTPS Google Calendar v3 endpoints. Core fetches the
+calendar list, appearance colors and recurring instances. Subsequent refreshes
+within a cached date window send the saved sync token. An expired sync token
+discards that calendar's cached instances and starts a full read. Offline
+snapshots are private, separated by OAuth client and Google account, and
+removed on disconnect. The backend queries events for the requested calendars
+and never modifies any event or calendar.
+
 ## Publishing
 
 Use separate Cloud projects for development/testing and production.
 In Testing, grants that include Calendar or Tasks scopes are limited to test
-accounts and expire after seven days. Google classifies both write scopes as
-sensitive. The production sign-in requests `openid email`. The consent screen
-uses verified branding, with a public homepage, privacy policy and terms on
-the verified domain. Production use of Calendar and Tasks requires scope
-approval.
-A production scope submission should demonstrate the implemented Tasks
-features and explain the user benefit.
+accounts and expire after seven days. The production identity-only sign-in
+requests `openid email`. The consent screen uses verified branding, with a
+public homepage, privacy policy and terms on the verified domain. Production
+use of Calendar and Tasks requires scope approval. A scope submission should
+demonstrate the relevant feature and explain the user benefit.
 
 References:
 
