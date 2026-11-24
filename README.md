@@ -56,6 +56,11 @@ starts with the graphical session. Enable the optional system updater separately
 when installing outside the system package manager. See
 [build, installation and migration instructions](docs/xdg-layout.md).
 
+## NixOS development
+
+See [NixOS debugging](docs/nixos-debug.md) for the development shell, a private
+D-Bus smoke test, and running Core alongside Remya apps in a Hyprland VM.
+
 ## License
 
 [PolyForm Noncommercial License 1.0.0](LICENSE).
