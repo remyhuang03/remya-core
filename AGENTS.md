@@ -8,8 +8,7 @@
   - **Shared** Remya settings (Remya Material theme, wallpaper accent, AI providers) are stored under `remya/shared/`.
   - **App** preferences are declared by each application in a registration file (`remya/apps/<id>.json`) and stored by the generic app-preferences store under `remya/<config>/settings.toml`. remyad must not contain code specific to one application's preferences; add application keys to that application's registration instead.
 - Host settings remain unavailable previews unless an integration is explicitly implemented and verified. Keep the integration permissions documented in each feature document under `docs/`; do not activate unrelated previews or modify unrelated desktop settings.
-- Maintain the settings catalog (`assets/catalog.json`) and its schema alongside the backend. `availability` and `reason` are the only implementation tracker; record verification evidence in the owning feature document before marking a feature available. Never present sample values as detected device state.
-- Write rule documents, including `AGENTS.md`, in English.
+- Maintain the settings catalog (`assets/catalog.json`) and its schema alongside the backend. `availability` and `reason` are the only implementation tracker; record verification evidence in the owning feature document before marking a feature available.
 
 ## Architecture
 - Rust crates live in `crates/<feature>/` under the root `Cargo.toml` workspace. Group backend functionality by feature; create crates only for concrete responsibility or dependency boundaries. `crates/service` is the daemon; do not turn it into a catch-all for feature logic.
@@ -25,7 +24,7 @@
 - System writes requiring elevation run in a separately authorized process over private bounded pipes. Authorization happens only on the first explicit Settings GUI launch and is reused while the daemon stays resident. Never expose arbitrary commands, configurable privileged paths or a public privileged socket. Requests from Bar or other read-mostly clients must never prompt for authorization.
 - System package updates run only through a fixed root-owned updater: `/usr/lib/remya-core/remya-core-update` with `packaging/50-top.remya.core.update.rules` from packages, or `/usr/local/libexec/remya-core-update` with a per-user rule from `sudo python tool/install_system_updater.py` for source installs; the packaged path wins when both exist. It accepts only `upgrade [--include-held]` and runs one fixed `pacman -Syu`; never widen its commands, accept paths or packages, or install AUR packages.
 - Keep `docs/public-api.md` and `docs/xdg-layout.md` synchronized with the implementation. Use isolated XDG roots and GSettings state for system-write verification.
-- Release preferences use `XDG_CONFIG_HOME/remya/{system,shared,<app config>}` with the standard HOME fallback; debug runs started with `--debug-root <repo>` use `<repo>/config/…`. Ignore relative XDG values.
+- Release preferences use `XDG_CONFIG_HOME/remya/{system,shared,<app config>}` with the standard HOME fallback; debug runs started with `--debug-root <repo>` use `<repo>/config/…`.
 
 ## Managed on Demand and Reconciliation
 - A system feature is managed only when its saved configuration file exists. Until then remyad reads live state and writes nothing for it. A feature becomes managed on its first successful Set or Resolve, or when a client calls `Manage(feature)` (the Settings GUI does so when a page opens). Never write first-use snapshots at daemon startup or during periodic refresh.
@@ -37,31 +36,43 @@
 - Assume fish is the user's default shell. Persist appearance-related environment variables only through fish and Hyprland configuration.
 - NetworkManager is the only network backend.
 - Target current Arch Linux packages; do not add compatibility layers for older system libraries or services.
-- Always invoke Dart as `fvm dart ...`. `.fvmrc` is the source of truth for the Flutter version. Do not change it without explicit instruction.
-- Use the root `rust-toolchain.toml` and inherit common crate metadata from the workspace. Commit `.fvmrc`, `pubspec.lock` files and `Cargo.lock`.
-- Reuse existing helpers and dependencies; add packages only for concrete requirements.
-- This project uses the PolyForm Noncommercial License 1.0.0 (`LICENSE`). Check dependency license compatibility and preserve third-party notices. Prefer permissive licenses; keep LGPL libraries dynamically linked or in separate processes; do not introduce GPL, AGPL, SSPL or other incompatible strong-copyleft code.
+- Always invoke Dart as `fvm dart ...`. `.fvmrc` is the source of truth for the Flutter version. Do not change it without explicit instruction. Commit `.fvmrc` and `pubspec.lock` files.
 
 ## Validation
-- Run `python tool/check_source_length.py` as part of local validation. It warns for Rust and Dart source files over 800 physical lines, including comments and blank lines. Review every reported file against the single-responsibility principle and refactor files that mix responsibilities.
-- When a reviewed file should stay together, run `python tool/check_source_length.py add <path> --reason "<why it should stay together>"` and include the updated `tool/source_length_exceptions.json` in the change. The exception applies only to that file's recorded SHA-256. Changed files still over 800 lines require another review.
-- Run before presenting changes:
+- Run package checks before presenting changes:
   ```bash
-  cargo fmt --all -- --check
-  cargo clippy --workspace --all-targets -- -D warnings
-  cargo test --workspace
   (cd packages/remya_client && fvm dart analyze)
   (cd packages/remya_ui && fvm flutter analyze)
-  git diff --check
   ```
-- Keep durable tests only for non-trivial logic and regressions. Validate configuration input, preserve the last valid state on errors and use atomic persistence.
-- After every code change, rebuild the release binaries and run `python tool/install.py` on this workstation as the final step, then verify the installed daemon, command, D-Bus activation file and user unit use the new build. Install remya-core before any dependent application. Preserve user configuration and unrelated installations.
+- Verify the installed daemon, command, D-Bus activation file and user unit use the new build after running `python tool/install.py`.
 
-## Releases
-- Use the user-level `remya-release` skill from [remya-apps-skills](https://github.com/remyhuang03/remya-apps-skills). remya-core is released first at every stage.
+<!-- BEGIN:remya-shared profiles=base,source-length,rust,workstation-install,release-skill -->
+<!-- Generated from remya-apps-skills/rules/. Do not edit manually; run remya-apps-skills/rules/sync.py. -->
 
-## Git Workflow
-- Develop and validate on a separate branch named `<type>/<short-description>`.
-- Use small, focused stacked commits following Conventional Commits: `<type>(<scope>): <description>` with a lowercase imperative description; mark breaking changes with `!` or a `BREAKING CHANGE:` footer. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`.
-- Inspect diffs, stage only intended paths and preserve unrelated changes.
-- Commit approval is mandatory: show completed changes and validation results before requesting explicit approval to run `git commit`. Approval to commit also authorizes merging ready branches into `main`, deleting fully merged local branches and pushing `main` to `origin`; verify remote refs afterwards.
+## Shared Remya Guidelines
+
+- Write rule documents, including `AGENTS.md`, in English.
+- Respect XDG base directories (`XDG_CONFIG_HOME`, `XDG_DATA_HOME`); ignore relative XDG values and use absolute `$HOME` fallbacks; do not create unused cache/state directories. Never automatically modify user Hyprland or desktop configuration.
+- License & dependencies: PolyForm Noncommercial License 1.0.0 (`LICENSE`). Check dependency license compatibility before adding code or libraries and preserve third-party notices. Prefer permissive licenses (`MIT`, `BSD`, `Apache-2.0`, `ISC`, `Zlib`, `Unlicense`). Keep `LGPL` libraries dynamically linked or in separate processes; never introduce `GPL`, `AGPL`, `SSPL`, or incompatible strong-copyleft code. Reuse existing helpers/packages.
+- Validation hygiene: Keep durable tests for non-trivial logic and regressions; remove obsolete, duplicate, or temporary UI-inspection tests before committing. Validate configuration input, preserve the last valid state on errors, and use atomic persistence.
+- Git workflow: Develop and validate on a separate branch `<type>/<short-description>` (lowercase words and hyphens). Use small, focused stacked commits when appropriate. Follow Conventional Commits: `<type>(<scope>): <description>` (lowercase imperative description without a final period; mark breaking changes with `!` or `BREAKING CHANGE:`). Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Inspect diffs, stage only intended paths, and preserve unrelated changes. Commit approval is mandatory: show completed changes and validation results before requesting explicit user approval to run `git commit`. Approval to commit also authorizes merging ready branches into `main`, deleting fully merged local branches (and clean worktrees), pushing `main` to `origin`, and verifying remote refs.
+
+### Source Length Check
+
+- Run `python tool/check_source_length.py` as part of local validation (warns for Rust and Dart files over 800 physical lines, including comments and blank lines). Review every reported file against the single-responsibility principle and refactor files that mix responsibilities.
+- When a reviewed file should stay together, run `python tool/check_source_length.py add <path> --reason "<why it should stay together>"` and include the updated `tool/source_length_exceptions.json` (keyed by SHA-256; modified files still over 800 lines require another review).
+
+### Rust Toolchain & Validation
+
+- Use the root `rust-toolchain.toml` (do not change toolchain channels without explicit instruction) and inherit common crate metadata from the workspace where applicable. Commit `Cargo.lock`; ignore build output.
+- Run before presenting changes: `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace`.
+
+### Workstation Release Install
+
+- After application or daemon code changes, finish validation, rebuild the release bundle/binaries, and run `python tool/install.py` on this workstation as the final implementation step so the user can manually review the installed application. Source changes and successful builds alone do not complete the task.
+- Verify that the installed bundle, command, desktop entry, and any service unit use the updated build, and exercise the installed application. Preserve user configuration and unrelated installations. Install `remya-core` before dependent apps (and Settings before Bar when both change). Stop verification instances you started without disabling persistent user units.
+
+### Releases
+
+- Use the user-level `remya-release` skill from [remya-apps-skills](https://github.com/remyhuang03/remya-apps-skills) for Linux release work (install via `npx skills add remyhuang03/remya-apps-skills --skill remya-release --agent codex --global`, then invoke `$remya-release`). Release `remya-core` first at every stage.
+<!-- END:remya-shared -->
