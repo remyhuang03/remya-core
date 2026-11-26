@@ -3,6 +3,7 @@
 ## Project Scope
 - `remya-core` is the shared settings backend for Remya applications on Hyprland/Linux. It provides the resident Rust daemon `remyad`, the `remya` CLI, the versioned session D-Bus API `top.remya.Core1`, the pure-Dart client `packages/remya_client` and the Flutter adapter `packages/remya_ui`.
 - Every Remya application (Settings, Bar, Launcher, Screen Capture) depends on remya-core, never on another application. Installing one application must not require or imply installing another.
+- Remya Image Resizer (`remya-image-resizer`) is a standalone application outside the Remya suite. Include it in development or release work only when explicitly requested.
 - Settings are split into three tiers:
   - **System** settings (display, input, network, sound, power, appearance, printers, updates, …) are implemented by the feature crates in `crates/` and stored under `remya/system/`.
   - **Shared** Remya settings (Remya Material theme, wallpaper accent, AI providers) are stored under `remya/shared/`.
