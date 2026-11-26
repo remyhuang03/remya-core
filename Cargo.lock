@@ -1930,7 +1930,7 @@ checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 
 [[package]]
 name = "remya_app_preferences"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "glib 0.21.5",
  "jsonschema",
@@ -1944,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "remya_appearance"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "gio",
@@ -1959,7 +1959,7 @@ dependencies = [
 
 [[package]]
 name = "remya_applications"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "backhand",
  "gio",
@@ -1973,7 +1973,7 @@ dependencies = [
 
 [[package]]
 name = "remya_background"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "material-colors",
  "remya_display",
@@ -1987,7 +1987,7 @@ dependencies = [
 
 [[package]]
 name = "remya_bluetooth"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "serde",
@@ -1996,7 +1996,7 @@ dependencies = [
 
 [[package]]
 name = "remya_camera"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gstreamer",
  "gstreamer-app",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "remya_date_time"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "remya_display",
@@ -2023,7 +2023,7 @@ dependencies = [
 
 [[package]]
 name = "remya_default_apps"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "remya_applications",
@@ -2037,7 +2037,7 @@ dependencies = [
 
 [[package]]
 name = "remya_display"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "rustix",
@@ -2051,7 +2051,7 @@ dependencies = [
 
 [[package]]
 name = "remya_fonts"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "remya_display",
  "serde_json",
@@ -2061,7 +2061,7 @@ dependencies = [
 
 [[package]]
 name = "remya_google_account"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64",
  "chrono",
@@ -2080,7 +2080,7 @@ dependencies = [
 
 [[package]]
 name = "remya_input"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "remya_display",
  "serde",
@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "remya_network"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "remya_bluetooth",
@@ -2105,7 +2105,7 @@ dependencies = [
 
 [[package]]
 name = "remya_power"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "remya_display",
@@ -2116,7 +2116,7 @@ dependencies = [
 
 [[package]]
 name = "remya_printers"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "remya_display",
  "serde_json",
@@ -2124,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "remya_service"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "remya_app_preferences",
@@ -2158,7 +2158,7 @@ dependencies = [
 
 [[package]]
 name = "remya_sound"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libpulse-binding",
  "serde",
@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "remya_startup"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "remya_applications",
@@ -2182,7 +2182,7 @@ dependencies = [
 
 [[package]]
 name = "remya_storage"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gio",
  "jwalk",
@@ -2197,7 +2197,7 @@ dependencies = [
 
 [[package]]
 name = "remya_system_information"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "gdk-pixbuf",
  "gio",
@@ -2211,7 +2211,7 @@ dependencies = [
 
 [[package]]
 name = "remya_updates"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "libc",
  "serde",
