@@ -1,5 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 
+import 'button_style.dart';
+
 /// A single option in a [SettingsSegmentedButton].
 class SettingsSegment<T> {
   const SettingsSegment(this.value, this.label, {this.icon});
@@ -92,7 +94,7 @@ class _SegmentButton extends StatelessWidget {
       inMutuallyExclusiveGroup: true,
       child: FilledButton(
         onPressed: onPressed,
-        style: _solidStyle(
+        style: settingsSolidStyle(
           colors,
           background: selected
               ? colors.primary
@@ -101,13 +103,13 @@ class _SegmentButton extends StatelessWidget {
               ? colors.onSurface.withValues(alpha: .22)
               : colors.onSurface.withValues(alpha: .08),
           foreground: selected ? colors.onPrimary : colors.onSurfaceVariant,
-          height: 36,
-          padding: const .symmetric(horizontal: 14),
+          height: settingsControlHeight,
+          padding: const .symmetric(horizontal: 16),
           radius: BorderRadiusDirectional.horizontal(
-            start: Radius.circular(selected || first ? 18 : 6),
-            end: Radius.circular(selected || last ? 18 : 6),
+            start: Radius.circular(selected || first ? 20 : 6),
+            end: Radius.circular(selected || last ? 20 : 6),
           ),
-          pressedRadius: .circular(14),
+          pressedRadius: .circular(12),
         ),
         child: Row(
           mainAxisSize: .min,
@@ -223,16 +225,18 @@ class _SettingsDropdownState<T> extends State<SettingsDropdown<T>> {
         (widget.selected == null ? '' : '${widget.selected}');
     final stretch = widget.fillWidth || widget.width != null;
     final minWidth = widget.width ?? _anchorWidth;
-    final menuStyle = (minWidth != null || widget.menuHeight != null)
-        ? MenuStyle(
-            minimumSize: minWidth == null
-                ? null
-                : WidgetStatePropertyAll(Size(minWidth, 0)),
-            maximumSize: widget.menuHeight == null
-                ? null
-                : WidgetStatePropertyAll(Size(.infinity, widget.menuHeight!)),
-          )
-        : null;
+    final menuStyle = MenuStyle(
+      padding: const WidgetStatePropertyAll(.all(6)),
+      shape: const WidgetStatePropertyAll(
+        RoundedRectangleBorder(borderRadius: .all(.circular(20))),
+      ),
+      minimumSize: minWidth == null
+          ? null
+          : WidgetStatePropertyAll(Size(minWidth, 0)),
+      maximumSize: widget.menuHeight == null
+          ? null
+          : WidgetStatePropertyAll(Size(.infinity, widget.menuHeight!)),
+    );
 
     final labelChild = Text(buttonText, maxLines: 1, overflow: .ellipsis);
     Widget trigger = MenuAnchor(
@@ -273,13 +277,13 @@ class _SettingsDropdownState<T> extends State<SettingsDropdown<T>> {
                     controller.open();
                   }
                 },
-          style: _solidStyle(
+          style: settingsSolidStyle(
             colors,
             background: colors.surfaceContainerHighest,
             disabledBackground: colors.onSurface.withValues(alpha: .12),
             foreground: colors.onSurface,
-            height: 36,
-            padding: const .fromLTRB(12, 0, 8, 0),
+            height: settingsControlHeight,
+            padding: const .fromLTRB(16, 0, 12, 0),
             radius: .circular(12),
           ),
           child: Row(
@@ -347,14 +351,23 @@ class _ChoiceMenuItemState<T> extends State<_ChoiceMenuItem<T>> {
   }
 
   @override
-  Widget build(BuildContext context) => MenuItemButton(
-    autofocus: widget.selected,
-    statesController: _states,
-    leadingIcon: widget.option.leadingIcon,
-    onPressed: widget.onPressed,
-    child: Semantics(
-      selected: widget.selected,
-      child: Text(widget.option.label),
+  // Inset, rounded items with a small gap, per MD3E expressive menus.
+  Widget build(BuildContext context) => Padding(
+    padding: const .symmetric(vertical: 1),
+    child: MenuItemButton(
+      autofocus: widget.selected,
+      statesController: _states,
+      leadingIcon: widget.option.leadingIcon,
+      onPressed: widget.onPressed,
+      style: MenuItemButton.styleFrom(
+        minimumSize: const Size(0, settingsMenuItemHeight),
+        padding: const .symmetric(horizontal: 16),
+        shape: const RoundedRectangleBorder(borderRadius: .all(.circular(14))),
+      ),
+      child: Semantics(
+        selected: widget.selected,
+        child: Text(widget.option.label),
+      ),
     ),
   );
 }
@@ -412,53 +425,3 @@ class SettingsChoice<T> extends StatelessWidget {
     );
   }
 }
-
-ButtonStyle _solidStyle(
-  ColorScheme colors, {
-  required Color background,
-  required Color disabledBackground,
-  required Color foreground,
-  required double height,
-  required EdgeInsetsGeometry padding,
-  required BorderRadiusGeometry radius,
-  BorderRadiusGeometry? pressedRadius,
-}) => ButtonStyle(
-  backgroundColor: .resolveWith(
-    (states) =>
-        states.contains(WidgetState.disabled) ? disabledBackground : background,
-  ),
-  foregroundColor: .resolveWith(
-    (states) => states.contains(WidgetState.disabled)
-        ? colors.onSurface.withValues(alpha: .38)
-        : foreground,
-  ),
-  overlayColor: .resolveWith((states) {
-    if (states.contains(WidgetState.pressed) ||
-        states.contains(WidgetState.focused)) {
-      return foreground.withValues(alpha: .12);
-    }
-    return states.contains(WidgetState.hovered)
-        ? foreground.withValues(alpha: .08)
-        : null;
-  }),
-  side: .resolveWith(
-    (states) => states.contains(WidgetState.focused)
-        ? BorderSide(color: foreground)
-        : null,
-  ),
-  shape: .resolveWith(
-    (states) => RoundedRectangleBorder(
-      borderRadius: states.contains(WidgetState.pressed)
-          ? pressedRadius ?? radius
-          : radius,
-    ),
-  ),
-  padding: .all(padding),
-  minimumSize: .all(Size(0, height)),
-  tapTargetSize: .shrinkWrap,
-  visualDensity: .standard,
-  splashFactory: NoSplash.splashFactory,
-  textStyle: const WidgetStatePropertyAll(
-    TextStyle(fontSize: 13, fontWeight: .w500, letterSpacing: 0),
-  ),
-);
